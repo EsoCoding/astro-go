@@ -34,7 +34,7 @@ var signNames = [...]string{
 	"Pisces",
 }
 
-var signGlyphs = [...]string{"Ar", "Ta", "Ge", "Cn", "Le", "Vi", "Li", "Sc", "Sg", "Cp", "Aq", "Pi"}
+var signGlyphs = [...]string{"a", "s", "d", "f", "g", "h", "j", "k", "l", "z", "x", "c"}
 
 func NormalizeDegrees(degrees float64) float64 {
 	for degrees < 0 {

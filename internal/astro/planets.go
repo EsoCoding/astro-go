@@ -15,13 +15,13 @@ const (
 var TraditionalPlanets = []Planet{Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn}
 
 var planetGlyphs = map[Planet]string{
-	Sun:     "Su",
-	Moon:    "Mo",
-	Mercury: "Me",
-	Venus:   "Ve",
-	Mars:    "Ma",
-	Jupiter: "Ju",
-	Saturn:  "Sa",
+	Sun:     "Q",
+	Moon:    "W",
+	Mercury: "E",
+	Venus:   "R",
+	Mars:    "T",
+	Jupiter: "Y",
+	Saturn:  "U",
 }
 
 func (p Planet) Glyph() string {

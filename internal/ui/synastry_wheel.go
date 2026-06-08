@@ -1,0 +1,312 @@
+package ui
+
+import (
+	"fmt"
+	"image/color"
+	"math"
+
+	"astro-go/internal/assets"
+	"astro-go/internal/astro"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
+)
+
+func NewSynastryWheel(chart astro.SynastryChart) fyne.CanvasObject {
+	wheel := &synastryWheel{chart: chart}
+	wheel.ExtendBaseWidget(wheel)
+	return wheel
+}
+
+type synastryWheel struct {
+	widget.BaseWidget
+
+	chart   astro.SynastryChart
+	content *fyne.Container
+}
+
+func (w *synastryWheel) CreateRenderer() fyne.WidgetRenderer {
+	w.content = container.NewWithoutLayout()
+	renderer := &synastryWheelRenderer{wheel: w}
+	w.layout(w.Size())
+	return renderer
+}
+
+func (w *synastryWheel) layout(size fyne.Size) {
+	if w.content == nil {
+		return
+	}
+	w.content.Resize(size)
+	w.content.Objects = synastryWheelObjects(w.chart, size)
+	w.content.Refresh()
+}
+
+type synastryWheelRenderer struct {
+	wheel *synastryWheel
+}
+
+func (r *synastryWheelRenderer) Layout(size fyne.Size) {
+	r.wheel.layout(size)
+}
+
+func (r *synastryWheelRenderer) MinSize() fyne.Size {
+	return fyne.NewSize(220, 220)
+}
+
+func (r *synastryWheelRenderer) Refresh() {
+	r.wheel.layout(r.wheel.Size())
+}
+
+func (r *synastryWheelRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.wheel.content}
+}
+
+func (r *synastryWheelRenderer) Destroy() {}
+
+func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.CanvasObject {
+	palette := currentChartPalette()
+	infoPanelWidth := 0.0
+	if size.Width > size.Height*1.1 {
+		infoPanelWidth = clamp(float64(size.Width)*0.30, 250, 340)
+	}
+	wheelAreaWidth := float64(size.Width) - infoPanelWidth
+	drawSize := math.Min(wheelAreaWidth, float64(size.Height)) - 24
+	if drawSize < 220 {
+		drawSize = 220
+	}
+
+	centerX := wheelAreaWidth * 0.5
+	centerY := float64(size.Height) / 2
+	outer := drawSize * 0.47
+	middle := drawSize * 0.36
+	innerHouseOuter := drawSize * 0.245
+	innerHouseInner := drawSize * 0.185
+	aspectRadius := innerHouseInner
+	innerPlanetExactRadius := middle
+	innerPlanetRadius := middle - drawSize*0.05
+	outerPlanetExactRadius := outer
+	outerPlanetRadius := outer - drawSize*0.05
+	signRadius := (outer + middle) * 0.5
+	houseNumberRadius := innerHouseInner + (innerHouseOuter-innerHouseInner)*0.6
+	ascendant := chart.InnerChart.Ascendant.Longitude
+
+	signTextSize := float32(clamp(drawSize*0.039, 12, 22))
+	planetTextSize := float32(clamp(drawSize*0.04, 12, 22))
+	houseTextSize := float32(clamp(drawSize*0.024, 9, 13))
+	aspectTextSize := float32(clamp(drawSize*0.018, 8, 11))
+	coordTextSize := float32(clamp(drawSize*0.023, 10, 13))
+
+	objects := []fyne.CanvasObject{
+		background(size, palette.background),
+		circle(centerX, centerY, outer, palette.wheel, 2),
+		circle(centerX, centerY, middle, palette.wheel, 1.6),
+		circle(centerX, centerY, innerHouseOuter, palette.wheel, 1.2),
+		circle(centerX, centerY, innerHouseInner, palette.wheel, 1.2),
+		circle(centerX, centerY, aspectRadius, palette.subtle, 1),
+	}
+
+	for degree := 0; degree < 360; degree++ {
+		longitude := float64(degree)
+		markerLength := drawSize * 0.008
+		width := float32(0.35)
+		tickColor := palette.tick
+		if degree%5 == 0 {
+			markerLength = drawSize * 0.014
+			width = 0.75
+			tickColor = palette.subtle
+		}
+		if degree%30 == 0 {
+			markerLength = drawSize * 0.02
+			width = 1.25
+			tickColor = palette.wheel
+		}
+		x1, y1 := chartPoint(centerX, centerY, outer-markerLength, longitude, ascendant)
+		x2, y2 := chartPoint(centerX, centerY, outer, longitude, ascendant)
+		objects = append(objects, line(x1, y1, x2, y2, tickColor, width))
+
+		x3, y3 := chartPoint(centerX, centerY, middle, longitude, ascendant)
+		x4, y4 := chartPoint(centerX, centerY, middle+markerLength*0.75, longitude, ascendant)
+		objects = append(objects, line(x3, y3, x4, y4, tickColor, width))
+	}
+
+	for i := 0; i < 12; i++ {
+		longitude := float64(i * 30)
+		x1, y1 := chartPoint(centerX, centerY, innerHouseInner, longitude, ascendant)
+		x2, y2 := chartPoint(centerX, centerY, outer, longitude, ascendant)
+		objects = append(objects, line(x1, y1, x2, y2, palette.wheel, 1.3))
+
+		labelLong := longitude + 15
+		x, y := chartPoint(centerX, centerY, signRadius, labelLong, ascendant)
+		text := canvas.NewText(astro.Sign(i).Glyph(), palette.sign)
+		text.TextSize = signTextSize
+		text.FontSource = assets.HamburgSymbolsFont
+		text.Move(fyne.NewPos(float32(x)-signTextSize/2, float32(y)-signTextSize*0.58))
+		objects = append(objects, text)
+	}
+
+	showHouseNumbers := len(chart.InnerChart.Houses) <= 18
+	for index, house := range chart.InnerChart.Houses {
+		longitude := house.CuspLongitude
+		width := float32(1)
+		if len(chart.InnerChart.Houses) == 12 && (house.Number == 1 || house.Number == 4 || house.Number == 7 || house.Number == 10) {
+			width = 2
+		}
+		x1, y1 := chartPoint(centerX, centerY, innerHouseInner, longitude, ascendant)
+		x2, y2 := chartPoint(centerX, centerY, middle, longitude, ascendant)
+		objects = append(objects, line(x1, y1, x2, y2, palette.house, width))
+
+		if showHouseNumbers {
+			labelLong := houseLabelLongitude(chart.InnerChart.Houses, index)
+			hx, hy := chartPoint(centerX, centerY, houseNumberRadius, labelLong, ascendant)
+			houseText := canvas.NewText(fmt.Sprintf("%d", house.Number), palette.houseNumber)
+			houseText.TextSize = houseTextSize
+			houseText.Move(fyne.NewPos(float32(hx)-houseTextSize*0.32, float32(hy)-houseTextSize*0.58))
+			objects = append(objects, houseText)
+		}
+	}
+
+	objects = append(objects, angularMarkers(centerX, centerY, drawSize, outer, innerHouseInner, ascendant, chart.InnerChart, palette, houseTextSize)...)
+
+	for _, aspect := range chart.InterAspects {
+		from, okFrom := planetLongitude(chart.InnerChart, aspect.Inner)
+		to, okTo := planetLongitude(chart.OuterChart, aspect.Outer)
+		if !okFrom || !okTo {
+			continue
+		}
+		x1, y1 := chartPoint(centerX, centerY, aspectRadius, from, ascendant)
+		x2, y2 := chartPoint(centerX, centerY, aspectRadius, to, ascendant)
+		stroke := aspectColor(aspect.Type, palette)
+		objects = append(objects, line(x1, y1, x2, y2, stroke, 1))
+		midX, midY := (x1+x2)/2, (y1+y2)/2
+		objects = append(objects, filledCircle(midX, midY, float64(aspectTextSize)*0.62, palette.background, palette.subtle, 0.4))
+		symbol := canvas.NewText(aspectGlyph(aspect.Type), stroke)
+		symbol.TextSize = aspectTextSize
+		symbol.FontSource = assets.HamburgSymbolsFont
+		symbol.Move(fyne.NewPos(float32(midX)-aspectTextSize*0.36, float32(midY)-aspectTextSize*0.58))
+		objects = append(objects, symbol)
+	}
+
+	for _, placement := range planetPlacements(chart.InnerChart.Planets, innerPlanetRadius, drawSize*0.038) {
+		ex, ey := chartPoint(centerX, centerY, innerPlanetExactRadius, placement.position.Longitude, ascendant)
+		gx, gy := chartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant)
+		stroke := planetColor(placement.position.Planet, palette)
+		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
+		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
+
+		// Draw a background masking circle to prevent lines (like house cusps) from overlapping the glyph
+		maskRadius := float64(planetTextSize) * 0.65
+		objects = append(objects, filledCircle(gx, gy, maskRadius, palette.background, color.Transparent, 0))
+
+		text := canvas.NewText(placement.position.Planet.Glyph(), stroke)
+		text.TextSize = planetTextSize
+		text.FontSource = assets.HamburgSymbolsFont
+		text.Move(fyne.NewPos(float32(gx)-planetTextSize/2, float32(gy)-planetTextSize*0.58))
+		objects = append(objects, text)
+	}
+
+	for _, placement := range planetPlacements(chart.OuterChart.Planets, outerPlanetRadius, drawSize*0.038) {
+		ex, ey := chartPoint(centerX, centerY, outerPlanetExactRadius, placement.position.Longitude, ascendant)
+		gx, gy := chartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant)
+		stroke := withAlpha(planetColor(placement.position.Planet, palette), 220)
+		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
+		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
+
+		// Draw a background masking circle to prevent lines (like house cusps) from overlapping the glyph
+		maskRadius := float64(planetTextSize) * 0.65
+		objects = append(objects, filledCircle(gx, gy, maskRadius, palette.background, color.Transparent, 0))
+
+		text := canvas.NewText(placement.position.Planet.Glyph(), stroke)
+		text.TextSize = planetTextSize
+		text.FontSource = assets.HamburgSymbolsFont
+		text.Move(fyne.NewPos(float32(gx)-planetTextSize/2, float32(gy)-planetTextSize*0.58))
+		objects = append(objects, text)
+	}
+
+	innerText := canvas.NewText(fmt.Sprintf("Inner %s", chart.InnerChart.Name), palette.text)
+	innerText.TextSize = coordTextSize
+	innerText.FontSource = assets.CourierFont
+	innerText.Move(fyne.NewPos(float32(centerX-outer), float32(centerY+outer+float64(coordTextSize)*0.4)))
+	objects = append(objects, innerText)
+
+	outerText := canvas.NewText(fmt.Sprintf("Outer %s", chart.OuterChart.Name), palette.mutedText)
+	outerText.TextSize = coordTextSize
+	outerText.FontSource = assets.CourierFont
+	outerText.Move(fyne.NewPos(float32(centerX-outer), float32(centerY+outer+float64(coordTextSize)*1.9)))
+	objects = append(objects, outerText)
+
+	if infoPanelWidth > 0 {
+		objects = append(objects, inCanvasSynastryPositions(chart, palette, wheelAreaWidth, float64(size.Height))...)
+	}
+
+	return objects
+}
+
+func angularMarkers(centerX, centerY, drawSize, outer, houseInner, ascendant float64, chart astro.Chart, palette chartPalette, houseTextSize float32) []fyne.CanvasObject {
+	objects := []fyne.CanvasObject{}
+	for _, marker := range []struct {
+		label     string
+		longitude float64
+		color     color.Color
+	}{
+		{"ASC", chart.Ascendant.Longitude, palette.accent},
+		{"DSC", astro.NormalizeDegrees(chart.Ascendant.Longitude + 180), palette.accent},
+		{"MC", chart.MC.Longitude, palette.secondaryAccent},
+		{"IC", astro.NormalizeDegrees(chart.MC.Longitude + 180), palette.secondaryAccent},
+	} {
+		x1, y1 := chartPoint(centerX, centerY, houseInner, marker.longitude, ascendant)
+		lineOuterRadius := outer + drawSize*0.018
+		labelOuterRadius := lineOuterRadius
+		if marker.label == "MC" || marker.label == "IC" {
+			lineOuterRadius = outer + drawSize*0.035
+			labelOuterRadius = outer + drawSize*0.055
+		}
+		x2, y2 := chartPoint(centerX, centerY, lineOuterRadius, marker.longitude, ascendant)
+		objects = append(objects, line(x1, y1, x2, y2, marker.color, 2))
+		lx, ly := chartPoint(centerX, centerY, labelOuterRadius, marker.longitude, ascendant)
+		label := canvas.NewText(marker.label, marker.color)
+		label.TextSize = houseTextSize
+		label.FontSource = assets.CourierFont
+		label.Move(angularMarkerLabelPosition(marker.label, lx, ly, houseTextSize))
+		objects = append(objects, label)
+	}
+	return objects
+}
+
+func inCanvasSynastryPositions(chart astro.SynastryChart, palette chartPalette, wheelAreaWidth, height float64) []fyne.CanvasObject {
+	x := wheelAreaWidth + 12
+	y := 18.0
+	width := 250.0
+	headerSize := float32(12)
+	bodySize := float32(10)
+	lineHeight := 17.0
+
+	objects := []fyne.CanvasObject{
+		panelBlock(x, 12, width, height-24, palette),
+		textAt(chart.Name, palette.text, headerSize+2, x+10, y, true, assets.CourierFont),
+	}
+	y += 24
+	objects = append(objects, textAt("Inner "+chart.InnerChart.Name, palette.text, bodySize, x+10, y, true, assets.CourierFont))
+	y += 16
+	objects = append(objects, textAt(chart.InnerChart.DateTimeUTC.Format("2006-01-02 15:04 UTC"), palette.mutedText, bodySize, x+10, y, false, assets.CourierFont))
+	y += 16
+	objects = append(objects, textAt("Outer "+chart.OuterChart.Name, palette.text, bodySize, x+10, y, true, assets.CourierFont))
+	y += 16
+	objects = append(objects, textAt(chart.OuterChart.DateTimeUTC.Format("2006-01-02 15:04 UTC"), palette.mutedText, bodySize, x+10, y, false, assets.CourierFont))
+	y += 22
+
+	objects = append(objects, textAt("Inter Aspects", palette.text, headerSize, x+10, y, true, assets.CourierFont))
+	y += 18
+	for i, aspect := range chart.InterAspects {
+		if i >= 14 {
+			objects = append(objects, textAt(fmt.Sprintf("+%d more", len(chart.InterAspects)-i), palette.mutedText, bodySize, x+10, y, false, assets.CourierFont))
+			break
+		}
+		row := fmt.Sprintf("%-4s %-1s %-4s", shortPlanetName(aspect.Inner), aspectGlyph(aspect.Type), shortPlanetName(aspect.Outer))
+		objects = append(objects, textAt(row, aspectColor(aspect.Type, palette), bodySize, x+10, y, false, assets.CourierFont))
+		y += lineHeight
+	}
+
+	return objects
+}

@@ -5,8 +5,13 @@ import "time"
 type BirthData struct {
 	Name             string
 	DateTimeUTC      time.Time
+	LocationName     string
 	LatitudeDegrees  float64
 	LongitudeDegrees float64
+	HouseSystem      HouseSystem
+	UTCOffset        string
+	TimezoneName     string
+	ChartType        ChartType
 }
 
 type PlanetPosition struct {
@@ -16,7 +21,7 @@ type PlanetPosition struct {
 	Speed           float64
 	Sign            Sign
 	DegreeInSign    float64
-	WholeSignHouse  int
+	House           int
 	Retrograde      bool
 	DomicileRuler   Planet
 	EssentialStatus string
@@ -30,9 +35,10 @@ type Angle struct {
 }
 
 type House struct {
-	Number int
-	Sign   Sign
-	Ruler  Planet
+	Number        int
+	CuspLongitude float64
+	Sign          Sign
+	Ruler         Planet
 }
 
 type Aspect struct {
@@ -44,14 +50,19 @@ type Aspect struct {
 }
 
 type Chart struct {
-	Name        string
-	DateTimeUTC time.Time
-	Latitude    float64
-	Longitude   float64
-	JulianDay   float64
-	Ascendant   Angle
-	MC          Angle
-	Houses      []House
-	Planets     []PlanetPosition
-	Aspects     []Aspect
+	Name         string
+	DateTimeUTC  time.Time
+	LocationName string
+	Latitude     float64
+	Longitude    float64
+	HouseSystem  HouseSystem
+	JulianDay    float64
+	Ascendant    Angle
+	MC           Angle
+	Houses       []House
+	Planets      []PlanetPosition
+	Aspects      []Aspect
+	UTCOffset    string
+	TimezoneName string
+	ChartType    ChartType
 }
