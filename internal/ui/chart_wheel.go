@@ -82,7 +82,7 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	outer := drawSize * 0.47
 	zodiacInner := drawSize * 0.415
 	planetExactRadius := zodiacInner
-	planetRadius := zodiacInner - drawSize*0.05
+	planetRadius := zodiacInner - drawSize*0.022
 	houseOuter := drawSize * 0.255
 	houseInner := drawSize * 0.205
 	houseNumberRadius := houseInner + (houseOuter-houseInner)*0.58
@@ -91,7 +91,7 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	signRadius := (outer + zodiacInner) * 0.5
 	ascendant := chart.Ascendant.Longitude
 	signTextSize := float32(clamp(drawSize*0.039, 12, 22))
-	planetTextSize := float32(clamp(drawSize*0.043, 13, 24))
+	planetTextSize := float32(clamp(drawSize*0.04, 12, 22))
 	coordTextSize := float32(clamp(drawSize*0.023, 10, 13))
 	houseTextSize := float32(clamp(drawSize*0.024, 9, 13))
 	aspectTextSize := float32(clamp(drawSize*0.018, 8, 11))
@@ -216,17 +216,13 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 		objects = append(objects, symbol)
 	}
 
-	for _, placement := range planetPlacements(chart.Planets, planetRadius, drawSize*0.038) {
+	for _, placement := range planetPlacements(chart.Planets, planetRadius, drawSize*0.024) {
 		ex, ey := chartPoint(centerX, centerY, planetExactRadius, placement.position.Longitude, ascendant)
 		gx, gy := chartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant)
-		objects = append(objects, line(ex, ey, gx, gy, planetColor(placement.position.Planet, palette), 0.8))
-		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, planetColor(placement.position.Planet, palette), planetColor(placement.position.Planet, palette), 0.5))
-
-		text := canvas.NewText(placement.position.Planet.Glyph(), planetColor(placement.position.Planet, palette))
-		text.TextSize = planetTextSize
-		text.FontSource = assets.HamburgSymbolsFont
-		text.Move(fyne.NewPos(float32(gx)-planetTextSize/2, float32(gy)-planetTextSize*0.58))
-		objects = append(objects, text)
+		stroke := planetColor(placement.position.Planet, palette)
+		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
+		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
+		objects = append(objects, planetLabelObjects(placement.position, gx, gy, planetTextSize, coordTextSize, stroke)...)
 	}
 
 	ascText := canvas.NewText(fmt.Sprintf("Asc %s", formatZodiacDMS(chart.Ascendant.Longitude)), palette.accent)
@@ -249,6 +245,7 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 type planetPlacement struct {
 	position astro.PlanetPosition
 	radius   float64
+	cluster  int
 }
 
 type chartPalette struct {
@@ -540,6 +537,65 @@ func line(x1, y1, x2, y2 float64, stroke color.Color, width float32) fyne.Canvas
 	return l
 }
 
+func planetLabelObjects(position astro.PlanetPosition, x, y float64, planetTextSize, detailTextSize float32, clr color.Color) []fyne.CanvasObject {
+	detailSize := detailTextSize * 0.72
+	objects := make([]fyne.CanvasObject, 0, 4)
+
+	glyph := canvas.NewText(position.Planet.Glyph(), clr)
+	glyph.TextSize = planetTextSize
+	glyph.FontSource = assets.HamburgSymbolsFont
+	glyph.Move(fyne.NewPos(float32(x)-planetTextSize*0.48, float32(y)-planetTextSize*0.72))
+	objects = append(objects, glyph)
+
+	degrees, minutes := zodiacDegreeMinuteParts(position.Longitude)
+	degreeText := canvas.NewText(fmt.Sprintf("%02d", degrees), clr)
+	degreeText.TextSize = detailSize
+	degreeText.FontSource = assets.CourierFont
+	degreeText.Move(fyne.NewPos(float32(x)-detailSize*0.34, float32(y)+planetTextSize*0.18))
+	objects = append(objects, degreeText)
+
+	minuteText := canvas.NewText(fmt.Sprintf("%02d'", minutes), clr)
+	minuteText.TextSize = detailSize * 0.72
+	minuteText.FontSource = assets.CourierFont
+	minuteText.Move(fyne.NewPos(float32(x)+detailSize*0.48, float32(y)-detailSize*0.24))
+	objects = append(objects, minuteText)
+
+	if position.Retrograde {
+		retrograde := canvas.NewText("R", clr)
+		retrograde.TextSize = detailSize * 0.72
+		retrograde.FontSource = assets.CourierFont
+		retrograde.Move(fyne.NewPos(float32(x)+detailSize*0.48, float32(y)+planetTextSize*0.54))
+		objects = append(objects, retrograde)
+	}
+	return objects
+}
+
+func planetClusterGuide(x, y float64, textSize float32, clr color.Color) fyne.CanvasObject {
+	return line(
+		x-float64(textSize)*0.42,
+		y+float64(textSize)*0.42,
+		x+float64(textSize)*0.85,
+		y+float64(textSize)*0.42,
+		withAlpha(clr, 145),
+		0.65,
+	)
+}
+
+func zodiacDegreeMinuteParts(longitude float64) (int, int) {
+	degreeInSign := astro.DegreeInSign(longitude)
+	degrees := int(math.Floor(degreeInSign))
+	minutes := int(math.Round((degreeInSign - float64(degrees)) * 60))
+	if minutes == 60 {
+		minutes = 0
+		degrees++
+	}
+	if degrees == 30 {
+		degrees = 29
+		minutes = 59
+	}
+	return degrees, minutes
+}
+
 func point(cx, cy, radius, longitude float64) (float64, float64) {
 	angle := (longitude - 90) * math.Pi / 180
 	return cx + math.Cos(angle)*radius, cy + math.Sin(angle)*radius
@@ -569,6 +625,7 @@ func planetPlacements(planets []astro.PlanetPosition, baseRadius, step float64) 
 		placements = append(placements, planetPlacement{
 			position: position,
 			radius:   baseRadius - float64(clusterDepth)*step,
+			cluster:  clusterDepth,
 		})
 		previousLongitude = position.Longitude
 	}

@@ -90,7 +90,7 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 	innerHouseInner := innerHouseOuter - houseBandWidth
 	aspectRadius := innerHouseInner
 	innerPlanetExactRadius := middle
-	innerPlanetRadius := middle - drawSize*0.04
+	innerPlanetRadius := middle - drawSize*0.026
 	signRadius := (outer + middle) * 0.5
 	innerZodiacCuspDegreeRadius := signRadius
 	outerZodiacCuspDegreeRadius := outerZodiacSignRadius
@@ -254,32 +254,22 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		objects = append(objects, symbol)
 	}
 
-	for _, placement := range planetPlacements(chart.InnerChart.Planets, innerPlanetRadius, drawSize*0.038) {
+	for _, placement := range planetPlacements(chart.InnerChart.Planets, innerPlanetRadius, drawSize*0.024) {
 		ex, ey := chartPoint(centerX, centerY, innerPlanetExactRadius, placement.position.Longitude, ascendant)
 		gx, gy := chartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant)
 		stroke := planetColor(placement.position.Planet, palette)
 		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
 		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
-
-		text := canvas.NewText(placement.position.Planet.Glyph(), stroke)
-		text.TextSize = planetTextSize
-		text.FontSource = assets.HamburgSymbolsFont
-		text.Move(fyne.NewPos(float32(gx)-planetTextSize/2, float32(gy)-planetTextSize*0.58))
-		objects = append(objects, text)
+		objects = append(objects, planetLabelObjects(placement.position, gx, gy, planetTextSize, coordTextSize, stroke)...)
 	}
 
-	for _, placement := range planetPlacements(chart.OuterChart.Planets, outerPlanetRadius, drawSize*0.038) {
+	for _, placement := range planetPlacements(chart.OuterChart.Planets, outerPlanetRadius, drawSize*0.024) {
 		ex, ey := chartPoint(centerX, centerY, outerPlanetExactRadius, placement.position.Longitude, ascendant)
 		gx, gy := chartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant)
 		stroke := withAlpha(planetColor(placement.position.Planet, palette), 220)
 		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
 		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
-
-		text := canvas.NewText(placement.position.Planet.Glyph(), stroke)
-		text.TextSize = planetTextSize
-		text.FontSource = assets.HamburgSymbolsFont
-		text.Move(fyne.NewPos(float32(gx)-planetTextSize/2, float32(gy)-planetTextSize*0.58))
-		objects = append(objects, text)
+		objects = append(objects, planetLabelObjects(placement.position, gx, gy, planetTextSize, coordTextSize, stroke)...)
 	}
 
 	innerText := canvas.NewText(fmt.Sprintf("Inner %s", chart.InnerChart.Name), palette.text)

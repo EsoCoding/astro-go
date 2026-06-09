@@ -6,8 +6,7 @@ bin/
 dist/
 tmp/
 
-ephe/
-ephemeris/
+third_party/swisseph/ephe/
 
 *.log
 *.test
