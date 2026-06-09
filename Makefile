@@ -1,22 +1,20 @@
 APP := astro-go
-SYSTEM_LIB := $(CURDIR)/third_party/system/lib
-CGO_SYSTEM_LDFLAGS := -L$(SYSTEM_LIB)
 
 .PHONY: build run test fmt env sweph-smoke desktop
 
 build:
-	CGO_LDFLAGS="$(CGO_SYSTEM_LDFLAGS)" go build -o bin/$(APP) ./cmd/$(APP)
+	go build -o bin/$(APP) ./cmd/$(APP)
 
 run:
-	CGO_LDFLAGS="$(CGO_SYSTEM_LDFLAGS)" go run ./cmd/$(APP)
+	go run ./cmd/$(APP)
 
 desktop: run
 
 test:
-	CGO_LDFLAGS="$(CGO_SYSTEM_LDFLAGS)" go test ./...
+	go test ./...
 
 sweph-smoke:
-	CGO_LDFLAGS="$(CGO_SYSTEM_LDFLAGS)" go run ./cmd/sweph-smoke
+	go run ./cmd/sweph-smoke
 
 fmt:
 	go fmt ./...

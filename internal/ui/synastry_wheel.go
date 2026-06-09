@@ -75,23 +75,31 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 
 	centerX := wheelAreaWidth * 0.5
 	centerY := float64(size.Height) / 2
-	outerHouseOuter := drawSize * 0.49
-	outerHouseInner := drawSize * 0.44
-	outerPlanetRadius := drawSize * 0.395
-	outerPlanetExactRadius := drawSize * 0.35
-	outer := drawSize * 0.35
-	middle := drawSize * 0.295
-	innerHouseOuter := drawSize * 0.17
-	innerHouseInner := drawSize * 0.12
+	outerZodiacOuter := drawSize * 0.49
+	zodiacBandWidth := drawSize * 0.04
+	houseBandWidth := drawSize * 0.028
+	outerZodiacInner := outerZodiacOuter - zodiacBandWidth
+	outerZodiacSignRadius := (outerZodiacOuter + outerZodiacInner) * 0.5
+	outer := drawSize * 0.325
+	middle := outer - zodiacBandWidth
+	outerHouseInner := outer
+	outerHouseOuter := outerHouseInner + houseBandWidth
+	outerPlanetExactRadius := outerZodiacInner - drawSize*0.035
+	outerPlanetRadius := outerPlanetExactRadius + drawSize*0.014
+	innerHouseOuter := drawSize * 0.152
+	innerHouseInner := innerHouseOuter - houseBandWidth
 	aspectRadius := innerHouseInner
 	innerPlanetExactRadius := middle
 	innerPlanetRadius := middle - drawSize*0.04
 	signRadius := (outer + middle) * 0.5
+	innerZodiacCuspDegreeRadius := signRadius
+	outerZodiacCuspDegreeRadius := outerZodiacSignRadius
 	houseNumberRadius := innerHouseInner + (innerHouseOuter-innerHouseInner)*0.6
 	outerHouseNumberRadius := outerHouseInner + (outerHouseOuter-outerHouseInner)*0.5
 	ascendant := chart.InnerChart.Ascendant.Longitude
 
-	signTextSize := float32(clamp(drawSize*0.039, 12, 22))
+	signTextSize := float32(clamp(drawSize*0.032, 10, 18))
+	cuspDegreeTextSize := float32(clamp(drawSize*0.017, 7, 10))
 	planetTextSize := float32(clamp(drawSize*0.04, 12, 22))
 	houseTextSize := float32(clamp(drawSize*0.024, 9, 13))
 	aspectTextSize := float32(clamp(drawSize*0.018, 8, 11))
@@ -99,8 +107,12 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 
 	objects := []fyne.CanvasObject{
 		background(size, palette.background),
+		filledCircle(centerX, centerY, outerZodiacOuter, color.NRGBA{R: 246, G: 241, B: 229, A: 255}, color.Transparent, 0),
+		filledCircle(centerX, centerY, outerZodiacInner, palette.background, color.Transparent, 0),
 		filledCircle(centerX, centerY, outer, color.NRGBA{R: 246, G: 241, B: 229, A: 255}, color.Transparent, 0),
 		filledCircle(centerX, centerY, middle, palette.background, color.Transparent, 0),
+		circle(centerX, centerY, outerZodiacOuter, palette.wheel, 2),
+		circle(centerX, centerY, outerZodiacInner, palette.wheel, 2),
 		circle(centerX, centerY, outerHouseOuter, palette.wheel, 2),
 		circle(centerX, centerY, outerHouseInner, palette.wheel, 2),
 		circle(centerX, centerY, outer, palette.wheel, 2),
@@ -132,6 +144,10 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		x3, y3 := chartPoint(centerX, centerY, middle, longitude, ascendant)
 		x4, y4 := chartPoint(centerX, centerY, middle+markerLength*0.75, longitude, ascendant)
 		objects = append(objects, line(x3, y3, x4, y4, tickColor, width))
+
+		x5, y5 := chartPoint(centerX, centerY, outerZodiacInner, longitude, ascendant)
+		x6, y6 := chartPoint(centerX, centerY, outerZodiacInner+markerLength*0.75, longitude, ascendant)
+		objects = append(objects, line(x5, y5, x6, y6, tickColor, width))
 	}
 
 	for i := 0; i < 12; i++ {
@@ -140,6 +156,10 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		x2, y2 := chartPoint(centerX, centerY, outer, longitude, ascendant)
 		objects = append(objects, line(x1, y1, x2, y2, palette.wheel, 1.3))
 
+		ox1, oy1 := chartPoint(centerX, centerY, outerZodiacInner, longitude, ascendant)
+		ox2, oy2 := chartPoint(centerX, centerY, outerZodiacOuter, longitude, ascendant)
+		objects = append(objects, line(ox1, oy1, ox2, oy2, palette.wheel, 1.2))
+
 		labelLong := longitude + 15
 		x, y := chartPoint(centerX, centerY, signRadius, labelLong, ascendant)
 		text := canvas.NewText(astro.Sign(i).Glyph(), palette.sign)
@@ -147,17 +167,29 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		text.FontSource = assets.HamburgSymbolsFont
 		text.Move(fyne.NewPos(float32(x)-signTextSize/2, float32(y)-signTextSize*0.58))
 		objects = append(objects, text)
+
+		ox, oy := chartPoint(centerX, centerY, outerZodiacSignRadius, labelLong, ascendant)
+		outerText := canvas.NewText(astro.Sign(i).Glyph(), palette.sign)
+		outerText.TextSize = signTextSize
+		outerText.FontSource = assets.HamburgSymbolsFont
+		outerText.Move(fyne.NewPos(float32(ox)-signTextSize/2, float32(oy)-signTextSize*0.58))
+		objects = append(objects, outerText)
 	}
 
 	showHouseNumbers := len(chart.InnerChart.Houses) <= 18
 	for index, house := range chart.InnerChart.Houses {
 		longitude := house.CuspLongitude
+		isAngularHouse := house.Number == 1 || house.Number == 4 || house.Number == 7 || house.Number == 10
 		width := float32(1)
-		if len(chart.InnerChart.Houses) == 12 && (house.Number == 1 || house.Number == 4 || house.Number == 7 || house.Number == 10) {
+		if len(chart.InnerChart.Houses) == 12 && isAngularHouse {
 			width = 3
 		}
 		x1, y1 := chartPoint(centerX, centerY, innerHouseInner, longitude, ascendant)
-		x2, y2 := chartPoint(centerX, centerY, middle, longitude, ascendant)
+		houseLineOuterRadius := innerHouseOuter
+		if isAngularHouse {
+			houseLineOuterRadius = outerZodiacOuter
+		}
+		x2, y2 := chartPoint(centerX, centerY, houseLineOuterRadius, longitude, ascendant)
 		objects = append(objects, line(x1, y1, x2, y2, palette.house, width))
 
 		if showHouseNumbers {
@@ -180,7 +212,7 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		// Notice that the ascendant passed is the inner chart's ascendant because the whole wheel is rotated
 		// based on the inner chart's ascendant!
 		x1, y1 := chartPoint(centerX, centerY, outer, longitude, ascendant)
-		x2, y2 := chartPoint(centerX, centerY, outerHouseOuter, longitude, ascendant)
+		x2, y2 := chartPoint(centerX, centerY, outerZodiacInner, longitude, ascendant)
 		objects = append(objects, line(x1, y1, x2, y2, palette.house, width))
 
 		if showOuterHouseNumbers {
@@ -193,8 +225,16 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		}
 	}
 
-	objects = append(objects, angularMarkers(centerX, centerY, drawSize, outerHouseOuter, innerHouseInner, ascendant, chart.InnerChart, palette, houseTextSize)...)
-	objects = append(objects, angularMarkers(centerX, centerY, drawSize, outerHouseOuter, outer, ascendant, chart.OuterChart, palette, houseTextSize)...)
+	for _, house := range chart.InnerChart.Houses {
+		objects = append(objects, cuspDegreeMinuteTexts(centerX, centerY, innerZodiacCuspDegreeRadius, house.CuspLongitude, ascendant, palette.houseNumber, cuspDegreeTextSize)...)
+	}
+
+	for _, house := range chart.OuterChart.Houses {
+		objects = append(objects, cuspDegreeMinuteTexts(centerX, centerY, outerZodiacCuspDegreeRadius, house.CuspLongitude, ascendant, palette.houseNumber, cuspDegreeTextSize)...)
+	}
+
+	objects = append(objects, angularMarkers(centerX, centerY, outerZodiacOuter, innerHouseInner, ascendant, chart.InnerChart, palette, houseTextSize)...)
+	objects = append(objects, angularMarkers(centerX, centerY, outerZodiacOuter, outer, ascendant, chart.OuterChart, palette, houseTextSize)...)
 
 	for _, aspect := range chart.InterAspects {
 		from, okFrom := planetLongitude(chart.InnerChart, aspect.Inner)
@@ -259,7 +299,7 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 	return objects
 }
 
-func angularMarkers(centerX, centerY, drawSize, outer, houseInner, ascendant float64, chart astro.Chart, palette chartPalette, houseTextSize float32) []fyne.CanvasObject {
+func angularMarkers(centerX, centerY, markerOuterRadius, houseInner, ascendant float64, chart astro.Chart, palette chartPalette, houseTextSize float32) []fyne.CanvasObject {
 	objects := []fyne.CanvasObject{}
 	for _, marker := range []struct {
 		label     string
@@ -272,10 +312,9 @@ func angularMarkers(centerX, centerY, drawSize, outer, houseInner, ascendant flo
 		{"IC", astro.NormalizeDegrees(chart.MC.Longitude + 180), palette.accent},
 	} {
 		x1, y1 := chartPoint(centerX, centerY, houseInner, marker.longitude, ascendant)
-		lineOuterRadius := outer + drawSize*0.035
-		labelOuterRadius := outer + drawSize*0.055
-		x2, y2 := chartPoint(centerX, centerY, lineOuterRadius, marker.longitude, ascendant)
+		x2, y2 := chartPoint(centerX, centerY, markerOuterRadius, marker.longitude, ascendant)
 		objects = append(objects, line(x1, y1, x2, y2, marker.color, 3))
+		labelOuterRadius := markerOuterRadius + float64(houseTextSize)*0.9
 		lx, ly := chartPoint(centerX, centerY, labelOuterRadius, marker.longitude, ascendant)
 		label := canvas.NewText(marker.label, marker.color)
 		label.TextSize = houseTextSize
@@ -284,6 +323,44 @@ func angularMarkers(centerX, centerY, drawSize, outer, houseInner, ascendant flo
 		objects = append(objects, label)
 	}
 	return objects
+}
+
+func formatWheelDegreeMinutes(longitude float64) string {
+	degrees, minutes := wheelDegreeMinuteParts(longitude)
+	return fmt.Sprintf("%02d°%02d'", degrees, minutes)
+}
+
+func wheelDegreeMinuteParts(longitude float64) (int, int) {
+	degreeInSign := astro.DegreeInSign(longitude)
+	degrees := int(math.Floor(degreeInSign))
+	minutes := int(math.Round((degreeInSign - float64(degrees)) * 60))
+	if minutes == 60 {
+		minutes = 0
+		degrees++
+	}
+	if degrees == 30 {
+		degrees = 29
+		minutes = 59
+	}
+	return degrees, minutes
+}
+
+func cuspDegreeMinuteTexts(centerX, centerY, radius, longitude, ascendant float64, clr color.Color, size float32) []fyne.CanvasObject {
+	degrees, minutes := wheelDegreeMinuteParts(longitude)
+	degreeX, degreeY := chartPoint(centerX, centerY, radius, astro.NormalizeDegrees(longitude-1.1), ascendant)
+	minuteX, minuteY := chartPoint(centerX, centerY, radius, astro.NormalizeDegrees(longitude+1.1), ascendant)
+	return []fyne.CanvasObject{
+		centeredText(fmt.Sprintf("%02d°", degrees), clr, size, degreeX, degreeY, assets.CourierFont),
+		centeredText(fmt.Sprintf("%02d'", minutes), clr, size, minuteX, minuteY, assets.CourierFont),
+	}
+}
+
+func centeredText(value string, clr color.Color, size float32, x, y float64, font fyne.Resource) fyne.CanvasObject {
+	text := canvas.NewText(value, clr)
+	text.TextSize = size
+	text.FontSource = font
+	text.Move(fyne.NewPos(float32(x)-float32(len(value))*size*0.3, float32(y)-size*0.5))
+	return text
 }
 
 func inCanvasSynastryInfo(chart astro.SynastryChart, palette chartPalette, size fyne.Size) []fyne.CanvasObject {

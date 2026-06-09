@@ -6,6 +6,9 @@ bin/
 dist/
 tmp/
 
+ephe/
+ephemeris/
+
 *.log
 *.test
 coverage.out

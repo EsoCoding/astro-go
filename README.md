@@ -113,10 +113,6 @@ On Debian/Ubuntu systems, Fyne may need the Xxf86vm development package:
 sudo apt install libxxf86vm-dev
 ```
 
-This workstation already had the runtime library but not the development
-symlink, so `third_party/system/lib/libXxf86vm.so` points to the installed
-runtime library for local builds.
-
 ## Fonts
 
 Application fonts live in `internal/assets/fonts` and are embedded into the
