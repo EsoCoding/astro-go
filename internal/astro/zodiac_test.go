@@ -46,4 +46,16 @@ func TestHamburgSymbolGlyphs(t *testing.T) {
 	if Sun.Glyph() != "Q" {
 		t.Fatalf("Sun glyph = %q, want HamburgSymbols key Q", Sun.Glyph())
 	}
+	if NorthNode.Glyph() != "\u008b" {
+		t.Fatalf("North Node glyph = %q, want HamburgSymbols key \\u008b", NorthNode.Glyph())
+	}
+	if SouthNode.Glyph() != "\u008c" {
+		t.Fatalf("South Node glyph = %q, want HamburgSymbols key \\u008c", SouthNode.Glyph())
+	}
+	if Chiron.Glyph() != "M" {
+		t.Fatalf("Chiron glyph = %q, want HamburgSymbols key M", Chiron.Glyph())
+	}
+	if ParsFortunae.Glyph() != "<" {
+		t.Fatalf("Pars Fortunae glyph = %q, want HamburgSymbols key <", ParsFortunae.Glyph())
+	}
 }

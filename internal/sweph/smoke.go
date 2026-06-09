@@ -1,10 +1,9 @@
 package sweph
 
 import (
-	"bytes"
 	"fmt"
 
-	"github.com/mshafiee/swephgo"
+	swisseph "github.com/tejzpr/go-swisseph"
 )
 
 type SmokeResult struct {
@@ -15,27 +14,21 @@ type SmokeResult struct {
 }
 
 func Smoke() (SmokeResult, error) {
-	version := make([]byte, 32)
-	swephgo.Version(version)
-	defer swephgo.Close()
+	version := swisseph.Version()
+	defer swisseph.Close()
 
-	julianDay := swephgo.Julday(2026, 6, 7, 12, swephgo.SeGregCal)
-	position := make([]float64, 6)
-	errbuf := make([]byte, 256)
+	configureEphemerisPath()
 
-	flags := swephgo.SeflgSwieph | swephgo.SeflgSpeed
-	if result := swephgo.CalcUt(julianDay, swephgo.SeSun, flags, position, errbuf); result < 0 {
-		return SmokeResult{}, fmt.Errorf("swiss ephemeris calculation failed: %s", cString(errbuf))
+	julianDay := swisseph.Julday(2026, 6, 7, 12, swisseph.GregCal)
+	result := swisseph.CalcUT(julianDay, swisseph.Sun, swisseph.FlagSwieph|swisseph.FlagSpeed)
+	if result.Flag < 0 {
+		return SmokeResult{}, fmt.Errorf("swiss ephemeris calculation failed: %s", result.Error)
 	}
 
 	return SmokeResult{
-		Version:      cString(version),
+		Version:      version,
 		JulianDay:    julianDay,
-		SunLongitude: position[0],
-		SunLatitude:  position[1],
+		SunLongitude: result.Data[0],
+		SunLatitude:  result.Data[1],
 	}, nil
-}
-
-func cString(value []byte) string {
-	return string(bytes.TrimRight(value, "\x00"))
 }

@@ -160,7 +160,7 @@ func (s *ChartStore) List() ([]SavedChart, error) {
 	return charts, rows.Err()
 }
 
-func (s *ChartStore) Save(chart SavedChart) error {
+func (s *ChartStore) Save(chart *SavedChart) error {
 	return s.save(chart, true)
 }
 
@@ -182,7 +182,7 @@ func (s *ChartStore) ImportPreferenceCharts(preferences fyne.Preferences) error 
 		return err
 	}
 	for _, chart := range charts {
-		if err := s.save(chart, false); err != nil {
+		if err := s.save(&chart, false); err != nil {
 			return err
 		}
 	}
@@ -255,6 +255,12 @@ func (s *ChartStore) initSchema() error {
 			chart_id TEXT NOT NULL REFERENCES saved_charts(id) ON DELETE CASCADE,
 			tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
 			PRIMARY KEY(chart_id, tag_id)
+		);
+
+		CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at_utc TEXT NOT NULL
 		);
 
 		CREATE TABLE IF NOT EXISTS chart_notes (
@@ -344,7 +350,7 @@ func (s *ChartStore) addSavedChartColumnIfMissing(name, definition string) error
 	return err
 }
 
-func (s *ChartStore) save(chart SavedChart, touchUpdatedAt bool) error {
+func (s *ChartStore) save(chart *SavedChart, touchUpdatedAt bool) error {
 	now := time.Now().UTC()
 	if chart.ID == "" {
 		chart.ID = chartID(chart.Name, now)

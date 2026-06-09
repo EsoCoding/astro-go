@@ -75,6 +75,8 @@ func Launch() {
 	}
 
 	if initial.Name == "" {
+		settings, _ := store.GetSettings()
+		
 		loc, err := time.LoadLocation("Europe/Amsterdam")
 		if err != nil {
 			loc = time.UTC
@@ -87,12 +89,30 @@ func Launch() {
 		initialTimeStr = nowLocal.Format("15:04")
 		initialOffsetStr = fmt.Sprintf("%g", offsetHours)
 
+		defaultLat := 52.3676
+		defaultLng := 4.9041
+		defaultLocName := "Amsterdam, Netherlands"
+		
+		if settings.DefaultLat != "" && settings.DefaultLng != "" {
+			if lat, err := strconv.ParseFloat(settings.DefaultLat, 64); err == nil {
+				defaultLat = lat
+			}
+			if lng, err := strconv.ParseFloat(settings.DefaultLng, 64); err == nil {
+				defaultLng = lng
+			}
+			if settings.DefaultLocation != "" {
+				defaultLocName = settings.DefaultLocation
+			} else {
+				defaultLocName = "Custom Location"
+			}
+		}
+
 		initial = astro.BirthData{
 			Name:             "Example Natal Chart",
 			DateTimeUTC:      nowLocal.UTC(),
-			LocationName:     "Amsterdam, Netherlands",
-			LatitudeDegrees:  52.3676,
-			LongitudeDegrees: 4.9041,
+			LocationName:     defaultLocName,
+			LatitudeDegrees:  defaultLat,
+			LongitudeDegrees: defaultLng,
 			HouseSystem:      astro.DefaultHouseSystem(),
 		}
 	}
@@ -133,7 +153,10 @@ func Launch() {
 	zodiacMode.SetSelected("Tropical")
 
 	wheelSlot := container.NewStack(NewChartWheel(chart))
-	chartBody := container.NewPadded(wheelSlot)
+	positionsSlot := container.NewStack(buildNatalPositions(chart))
+	chartArea := container.NewHSplit(container.NewPadded(wheelSlot), container.NewPadded(positionsSlot))
+	chartArea.Offset = 0.75
+	chartBody := chartArea
 	status := widget.NewLabel("Ready")
 	currentInputSummary := widget.NewLabel(currentChartInputSummary(name.Text, date.Text, clock.Text))
 	var chartList *widget.List
@@ -184,7 +207,7 @@ func Launch() {
 		if updateSelected && selectedSavedID != "" {
 			saved.ID = selectedSavedID
 		}
-		if saveErr := store.Save(saved); saveErr != nil {
+		if saveErr := store.Save(&saved); saveErr != nil {
 			status.SetText(saveErr.Error())
 			return
 		}
@@ -222,17 +245,21 @@ func Launch() {
 		status.SetText("Deleted saved chart")
 	}
 
-	refreshChart := func(nextChart astro.Chart) {
-		currentChart = nextChart
-		wheelSlot.Objects = []fyne.CanvasObject{NewChartWheel(nextChart)}
+	refreshChart := func(c astro.Chart) {
+		currentChart = c
+		wheelSlot.Objects = []fyne.CanvasObject{NewChartWheel(c)}
 		wheelSlot.Refresh()
-		status.SetText(fmt.Sprintf("Calculated %s", nextChart.DateTimeUTC.Format("2006-01-02 15:04 UTC")))
+		positionsSlot.Objects = []fyne.CanvasObject{buildNatalPositions(c)}
+		positionsSlot.Refresh()
 	}
 
-	refreshSynastryChart := func(nextChart astro.SynastryChart) {
-		wheelSlot.Objects = []fyne.CanvasObject{NewSynastryWheel(nextChart)}
+	refreshSynastryChart := func(synastry astro.SynastryChart) {
+		currentChart = synastry.InnerChart
+		wheelSlot.Objects = []fyne.CanvasObject{NewSynastryWheel(synastry)}
 		wheelSlot.Refresh()
-		status.SetText(fmt.Sprintf("Loaded synastry %s", nextChart.Name))
+		positionsSlot.Objects = []fyne.CanvasObject{buildSynastryPositions(synastry)}
+		positionsSlot.Refresh()
+		status.SetText(fmt.Sprintf("Loaded Synastry %s x %s", synastry.InnerChart.Name, synastry.OuterChart.Name))
 	}
 
 	calculateActiveChart := func() bool {
@@ -259,22 +286,37 @@ func Launch() {
 		dataWindow := application.NewWindow("New Natal Chart")
 		dataWindow.Resize(fyne.NewSize(420, 360))
 
-		nextName := widget.NewEntry()
-		nextDate := widget.NewEntry()
-		nextTime := widget.NewEntry()
-		nextOffset := widget.NewEntry()
-		nextLocation := widget.NewEntry()
-		nextLatitude := widget.NewEntry()
-		nextLongitude := widget.NewEntry()
+		nextName := newTabbableEntry()
+		nextDate := newTabbableEntry()
+		nextTime := newTabbableEntry()
+		nextOffset := newTabbableEntry()
+		nextLocation := newTabbableEntry()
+		nextLatitude := newTabbableEntry()
+		nextLongitude := newTabbableEntry()
 		nextHouseSystem := widget.NewSelect(astro.HouseSystemOptions(), nil)
 
 		nextName.SetText(defaultChartName(astro.ChartTypeNatal))
 		nextDate.SetText(time.Now().Format("2006-01-02"))
 		nextTime.SetText("12:00")
 		nextOffset.SetText("0")
-		nextLocation.SetText(locationName.Text)
-		nextLatitude.SetText(latitude.Text)
-		nextLongitude.SetText(longitude.Text)
+		settings, _ := store.GetSettings()
+		locText := locationName.Text
+		latText := latitude.Text
+		lngText := longitude.Text
+		
+		if settings.DefaultLocation != "" || settings.DefaultLat != "" {
+			if settings.DefaultLocation != "" {
+				locText = settings.DefaultLocation
+			}
+			if settings.DefaultLat != "" {
+				latText = settings.DefaultLat
+				lngText = settings.DefaultLng
+			}
+		}
+
+		nextLocation.SetText(locText)
+		nextLatitude.SetText(latText)
+		nextLongitude.SetText(lngText)
 		nextHouseSystem.SetSelected(houseSystem.Selected)
 		lookupLocation := widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
 			result, err := geocoder.Lookup(nextLocation.Text)
@@ -289,25 +331,14 @@ func Launch() {
 		})
 
 		onCuspsChanged := func(string) {
-			updateOffset(nextDate, nextTime, nextLatitude, nextLongitude, nextOffset, status)
+			updateOffset(&nextDate.Entry, &nextTime.Entry, &nextLatitude.Entry, &nextLongitude.Entry, &nextOffset.Entry, status)
 		}
 		nextDate.OnChanged = onCuspsChanged
 		nextTime.OnChanged = onCuspsChanged
 		nextLatitude.OnChanged = onCuspsChanged
 		nextLongitude.OnChanged = onCuspsChanged
 
-		updateOffset(nextDate, nextTime, nextLatitude, nextLongitude, nextOffset, status)
-
-		form := widget.NewForm(
-			widget.NewFormItem("Name", nextName),
-			widget.NewFormItem("Date", nextDate),
-			widget.NewFormItem("Time", nextTime),
-			widget.NewFormItem("UTC offset", nextOffset),
-			widget.NewFormItem("Location", container.NewBorder(nil, nil, nil, lookupLocation, nextLocation)),
-			widget.NewFormItem("Latitude", nextLatitude),
-			widget.NewFormItem("Longitude", nextLongitude),
-			widget.NewFormItem("Houses", nextHouseSystem),
-		)
+		updateOffset(&nextDate.Entry, &nextTime.Entry, &nextLatitude.Entry, &nextLongitude.Entry, &nextOffset.Entry, status)
 
 		create := func() {
 			selectedSavedID = ""
@@ -324,10 +355,52 @@ func Launch() {
 				saveCurrentChartAsNew()
 			}
 		}
-		form.OnSubmit = create
-		form.OnCancel = dataWindow.Close
 
-		dataWindow.SetContent(widget.NewCard("Natal Chart", "Create a natal chart from birth data.", form))
+		onSubmit := func(string) {
+			create()
+		}
+		nextName.OnSubmitted = onSubmit
+		nextDate.OnSubmitted = onSubmit
+		nextTime.OnSubmitted = onSubmit
+		nextOffset.OnSubmitted = onSubmit
+		nextLocation.OnSubmitted = onSubmit
+		nextLatitude.OnSubmitted = onSubmit
+		nextLongitude.OnSubmitted = onSubmit
+
+		createLabeledField := func(labelText string, input fyne.CanvasObject) fyne.CanvasObject {
+			lbl := widget.NewLabelWithStyle(labelText, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			return container.NewVBox(lbl, input)
+		}
+
+		nameField := createLabeledField("Name", nextName)
+		dateField := createLabeledField("Date", nextDate)
+		timeField := createLabeledField("Time", nextTime)
+		offsetField := createLabeledField("UTC Offset", nextOffset)
+		locationField := createLabeledField("Location", container.NewBorder(nil, nil, nil, lookupLocation, nextLocation))
+		latitudeField := createLabeledField("Latitude", nextLatitude)
+		longitudeField := createLabeledField("Longitude", nextLongitude)
+		housesField := createLabeledField("Houses", nextHouseSystem)
+
+		formLayout := container.NewVBox(
+			nameField,
+			container.NewGridWithColumns(2, dateField, timeField),
+			locationField,
+			container.NewGridWithColumns(3, latitudeField, longitudeField, offsetField),
+			housesField,
+		)
+
+		buttons := container.NewGridWithColumns(2,
+			widget.NewButton("Cancel", dataWindow.Close),
+			widget.NewButton("Create", create),
+		)
+
+		dataWindow.SetContent(widget.NewCard("Natal Chart", "Create a natal chart from birth data.", container.NewBorder(
+			nil,
+			buttons,
+			nil,
+			nil,
+			formLayout,
+		)))
 		dataWindow.Show()
 	}
 
@@ -444,7 +517,7 @@ func Launch() {
 				saved.ReferenceTime = nextReferenceTime.Text
 				saved.ReferenceUTC = referenceUTC.Format(time.RFC3339)
 			}
-			if saveErr := store.Save(saved); saveErr != nil {
+			if saveErr := store.Save(&saved); saveErr != nil {
 				status.SetText(saveErr.Error())
 				return
 			}
@@ -480,19 +553,19 @@ func Launch() {
 		dataWindow := application.NewWindow("Birth Data")
 		dataWindow.Resize(fyne.NewSize(420, 360))
 
-		editName := widget.NewEntry()
+		editName := newTabbableEntry()
 		editName.SetText(name.Text)
-		editDate := widget.NewEntry()
+		editDate := newTabbableEntry()
 		editDate.SetText(date.Text)
-		editTime := widget.NewEntry()
+		editTime := newTabbableEntry()
 		editTime.SetText(clock.Text)
-		editOffset := widget.NewEntry()
+		editOffset := newTabbableEntry()
 		editOffset.SetText(timezone.Text)
-		editLocation := widget.NewEntry()
+		editLocation := newTabbableEntry()
 		editLocation.SetText(locationName.Text)
-		editLatitude := widget.NewEntry()
+		editLatitude := newTabbableEntry()
 		editLatitude.SetText(latitude.Text)
-		editLongitude := widget.NewEntry()
+		editLongitude := newTabbableEntry()
 		editLongitude.SetText(longitude.Text)
 		editHouseSystem := widget.NewSelect(astro.HouseSystemOptions(), nil)
 		editHouseSystem.SetSelected(houseSystem.Selected)
@@ -509,25 +582,15 @@ func Launch() {
 		})
 
 		onCuspsChanged := func(string) {
-			updateOffset(editDate, editTime, editLatitude, editLongitude, editOffset, status)
+			updateOffset(&editDate.Entry, &editTime.Entry, &editLatitude.Entry, &editLongitude.Entry, &editOffset.Entry, status)
 		}
 		editDate.OnChanged = onCuspsChanged
 		editTime.OnChanged = onCuspsChanged
 		editLatitude.OnChanged = onCuspsChanged
 		editLongitude.OnChanged = onCuspsChanged
 
-		updateOffset(editDate, editTime, editLatitude, editLongitude, editOffset, status)
+		updateOffset(&editDate.Entry, &editTime.Entry, &editLatitude.Entry, &editLongitude.Entry, &editOffset.Entry, status)
 
-		form := widget.NewForm(
-			widget.NewFormItem("Name", editName),
-			widget.NewFormItem("Date", editDate),
-			widget.NewFormItem("Time", editTime),
-			widget.NewFormItem("UTC offset", editOffset),
-			widget.NewFormItem("Location", container.NewBorder(nil, nil, nil, lookupLocation, editLocation)),
-			widget.NewFormItem("Latitude", editLatitude),
-			widget.NewFormItem("Longitude", editLongitude),
-			widget.NewFormItem("Houses", editHouseSystem),
-		)
 		apply := func() {
 			name.SetText(editName.Text)
 			date.SetText(editDate.Text)
@@ -540,10 +603,52 @@ func Launch() {
 			dataWindow.Close()
 			calculate()
 		}
-		form.OnSubmit = apply
-		form.OnCancel = dataWindow.Close
 
-		dataWindow.SetContent(widget.NewCard("Birth Data", "Edit the active chart input.", form))
+		onSubmit := func(string) {
+			apply()
+		}
+		editName.OnSubmitted = onSubmit
+		editDate.OnSubmitted = onSubmit
+		editTime.OnSubmitted = onSubmit
+		editOffset.OnSubmitted = onSubmit
+		editLocation.OnSubmitted = onSubmit
+		editLatitude.OnSubmitted = onSubmit
+		editLongitude.OnSubmitted = onSubmit
+
+		createLabeledField := func(labelText string, input fyne.CanvasObject) fyne.CanvasObject {
+			lbl := widget.NewLabelWithStyle(labelText, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			return container.NewVBox(lbl, input)
+		}
+
+		nameField := createLabeledField("Name", editName)
+		dateField := createLabeledField("Date", editDate)
+		timeField := createLabeledField("Time", editTime)
+		offsetField := createLabeledField("UTC Offset", editOffset)
+		locationField := createLabeledField("Location", container.NewBorder(nil, nil, nil, lookupLocation, editLocation))
+		latitudeField := createLabeledField("Latitude", editLatitude)
+		longitudeField := createLabeledField("Longitude", editLongitude)
+		housesField := createLabeledField("Houses", editHouseSystem)
+
+		formLayout := container.NewVBox(
+			nameField,
+			container.NewGridWithColumns(2, dateField, timeField),
+			locationField,
+			container.NewGridWithColumns(3, latitudeField, longitudeField, offsetField),
+			housesField,
+		)
+
+		buttons := container.NewGridWithColumns(2,
+			widget.NewButton("Cancel", dataWindow.Close),
+			widget.NewButton("Apply", apply),
+		)
+
+		dataWindow.SetContent(widget.NewCard("Birth Data", "Edit the active chart input.", container.NewBorder(
+			nil,
+			buttons,
+			nil,
+			nil,
+			formLayout,
+		)))
 		dataWindow.Show()
 	}
 
@@ -587,28 +692,8 @@ func Launch() {
 		), window)
 	}
 
-	showSettingsWindow := func() {
-		settingsWindow := application.NewWindow("Traditional Settings")
-		settingsWindow.Resize(fyne.NewSize(380, 220))
-		settingsZodiacMode := widget.NewSelect([]string{"Tropical"}, nil)
-		settingsZodiacMode.SetSelected(zodiacMode.Selected)
-		settingsHouseSystem := widget.NewSelect(astro.HouseSystemOptions(), nil)
-		settingsHouseSystem.SetSelected(houseSystem.Selected)
-		form := widget.NewForm(
-			widget.NewFormItem("Zodiac", settingsZodiacMode),
-			widget.NewFormItem("Houses", settingsHouseSystem),
-		)
-		apply := func() {
-			zodiacMode.SetSelected(settingsZodiacMode.Selected)
-			houseSystem.SetSelected(settingsHouseSystem.Selected)
-			status.SetText(fmt.Sprintf("Settings updated: %s, %s houses", zodiacMode.Selected, houseSystem.Selected))
-			settingsWindow.Close()
-		}
-		form.OnSubmit = apply
-		form.OnCancel = settingsWindow.Close
-
-		settingsWindow.SetContent(widget.NewCard("Traditional Settings", "Chart calculation defaults.", form))
-		settingsWindow.Show()
+	showGlobalSettings := func() {
+		showSettingsDialog(window, store)
 	}
 
 	window.SetMainMenu(fyne.NewMainMenu(
@@ -622,7 +707,7 @@ func Launch() {
 			fyne.NewMenuItem("Quit", application.Quit),
 		),
 		fyne.NewMenu("View",
-			fyne.NewMenuItem("Settings", showSettingsWindow),
+			fyne.NewMenuItem("Settings", showGlobalSettings),
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("Dark Mode", setDarkTheme),
 			fyne.NewMenuItem("Light Mode", setLightTheme),
@@ -754,7 +839,7 @@ func Launch() {
 		widget.NewToolbarAction(theme.DocumentCreateIcon(), showNewNatalChartDialog),
 		widget.NewToolbarAction(theme.ContentAddIcon(), showNewDerivedChartDialog),
 		widget.NewToolbarAction(theme.AccountIcon(), showBirthDataDialog),
-		widget.NewToolbarAction(theme.SettingsIcon(), showSettingsWindow),
+		widget.NewToolbarAction(theme.SettingsIcon(), showGlobalSettings),
 		widget.NewToolbarAction(theme.ConfirmIcon(), calculate),
 		widget.NewToolbarAction(theme.DocumentSaveIcon(), saveCurrentChart),
 		widget.NewToolbarAction(theme.ViewRefreshIcon(), func() { refreshChart(currentChart) }),
@@ -960,5 +1045,19 @@ func updateOffset(dateEntry, timeEntry, latEntry, lonEntry, offsetEntry *widget.
 			statusLabel.SetText(fmt.Sprintf("Timezone: %s (Offset: %g)", tzName, offset))
 		}
 	}
+}
+
+type tabbableEntry struct {
+	widget.Entry
+}
+
+func newTabbableEntry() *tabbableEntry {
+	e := &tabbableEntry{}
+	e.ExtendBaseWidget(e)
+	return e
+}
+
+func (e *tabbableEntry) AcceptsTab() bool {
+	return false
 }
 

@@ -83,31 +83,56 @@ func TestChartResolverResolvesTransitSavedChart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(transit) error = %v", err)
 	}
-	if resolved.Single == nil {
-		t.Fatal("resolved.Single = nil for transit chart")
+	if resolved.Synastry == nil {
+		t.Fatal("resolved.Synastry = nil for transit chart")
 	}
-	chart := *resolved.Single
-	if chart.Name != "Alice Transit" {
-		t.Fatalf("chart.Name = %q, want transit definition name", chart.Name)
+	synastry := *resolved.Synastry
+	if synastry.Name != "Alice Transit" {
+		t.Fatalf("synastry.Name = %q, want transit definition name", synastry.Name)
+	}
+	if synastry.InnerChart.Name != "Alice Natal" {
+		t.Fatalf("synastry.InnerChart.Name = %q, want Alice Natal", synastry.InnerChart.Name)
+	}
+	if synastry.OuterChart.Name != "Transits" {
+		t.Fatalf("synastry.OuterChart.Name = %q, want Transits", synastry.OuterChart.Name)
 	}
 	if calc.lastBirthData.DateTimeUTC != time.Date(2026, 6, 8, 9, 30, 0, 0, time.UTC) {
 		t.Fatalf("transit UTC = %s, want 2026-06-08 09:30 UTC", calc.lastBirthData.DateTimeUTC)
 	}
-	if calc.lastBirthData.LatitudeDegrees != 52.3676 || calc.lastBirthData.LongitudeDegrees != 4.9041 {
-		t.Fatalf("transit location = %f,%f; want base chart location", calc.lastBirthData.LatitudeDegrees, calc.lastBirthData.LongitudeDegrees)
-	}
 }
 
-func TestChartResolverRejectsUnsupportedDerivedType(t *testing.T) {
+func TestChartResolverResolvesProgressionSavedChart(t *testing.T) {
 	calc := &fakeChartCalculator{result: astro.Chart{}}
 	resolver := NewChartResolver(calc)
 
-	_, err := resolver.Resolve(storage.SavedChart{
-		Name:      "Progressed Alice",
-		ChartType: string(astro.ChartTypeSecondaryProgression),
-	}, nil)
-	if err == nil {
-		t.Fatal("Resolve(progressed) error = nil, want unsupported error")
+	base := storage.SavedChart{
+		ID:               "base",
+		Name:             "Alice Natal",
+		ChartType:        string(astro.ChartTypeNatal),
+		LocalDate:        "1990-01-01",
+		LocalTime:        "12:00",
+		UTCOffset:        "0",
+		LatitudeDegrees:  "52.3676",
+		LongitudeDegrees: "4.9041",
+	}
+	prog := storage.SavedChart{
+		Name:          "Alice Progressed",
+		ChartType:     string(astro.ChartTypeSecondaryProgression),
+		BaseChartID:   "base",
+		ReferenceDate: "2026-06-08",
+		ReferenceTime: "09:30",
+	}
+
+	resolved, err := resolver.Resolve(prog, []storage.SavedChart{base})
+	if err != nil {
+		t.Fatalf("Resolve(progression) error = %v", err)
+	}
+	if resolved.Synastry == nil {
+		t.Fatal("resolved.Synastry = nil for progression chart")
+	}
+	synastry := *resolved.Synastry
+	if synastry.Name != "Alice Progressed" {
+		t.Fatalf("synastry.Name = %q, want progression definition name", synastry.Name)
 	}
 }
 
@@ -151,5 +176,77 @@ func TestChartResolverResolvesSynastrySavedChart(t *testing.T) {
 	}
 	if resolved.Synastry.InnerChart.Name != "Alice" || resolved.Synastry.OuterChart.Name != "Bob" {
 		t.Fatalf("synastry names = %q / %q, want Alice / Bob", resolved.Synastry.InnerChart.Name, resolved.Synastry.OuterChart.Name)
+	}
+}
+
+func TestChartResolverResolvesSolarReturnSavedChart(t *testing.T) {
+	calc := &fakeChartCalculator{result: astro.Chart{
+		Planets: []astro.PlanetPosition{
+			{Planet: astro.Sun, Longitude: 100.0},
+			{Planet: astro.Moon, Longitude: 200.0},
+		},
+	}}
+	resolver := NewChartResolver(calc)
+
+	base := storage.SavedChart{
+		ID:               "base",
+		Name:             "Alice Natal",
+		ChartType:        string(astro.ChartTypeNatal),
+		LocalDate:        "1990-01-01",
+		LocalTime:        "12:00",
+		UTCOffset:        "0",
+		LatitudeDegrees:  "52.3676",
+		LongitudeDegrees: "4.9041",
+	}
+	sr := storage.SavedChart{
+		Name:          "Alice Solar Return",
+		ChartType:     string(astro.ChartTypeSolarReturn),
+		BaseChartID:   "base",
+		ReferenceDate: "2026-06-08",
+		ReferenceTime: "09:30",
+	}
+
+	resolved, err := resolver.Resolve(sr, []storage.SavedChart{base})
+	if err != nil {
+		t.Fatalf("Resolve(solar_return) error = %v", err)
+	}
+	if resolved.Synastry == nil {
+		t.Fatal("resolved.Synastry = nil for solar return chart")
+	}
+}
+
+func TestChartResolverResolvesLunarReturnSavedChart(t *testing.T) {
+	calc := &fakeChartCalculator{result: astro.Chart{
+		Planets: []astro.PlanetPosition{
+			{Planet: astro.Sun, Longitude: 100.0},
+			{Planet: astro.Moon, Longitude: 200.0},
+		},
+	}}
+	resolver := NewChartResolver(calc)
+
+	base := storage.SavedChart{
+		ID:               "base",
+		Name:             "Alice Natal",
+		ChartType:        string(astro.ChartTypeNatal),
+		LocalDate:        "1990-01-01",
+		LocalTime:        "12:00",
+		UTCOffset:        "0",
+		LatitudeDegrees:  "52.3676",
+		LongitudeDegrees: "4.9041",
+	}
+	lr := storage.SavedChart{
+		Name:          "Alice Lunar Return",
+		ChartType:     string(astro.ChartTypeLunarReturn),
+		BaseChartID:   "base",
+		ReferenceDate: "2026-06-08",
+		ReferenceTime: "09:30",
+	}
+
+	resolved, err := resolver.Resolve(lr, []storage.SavedChart{base})
+	if err != nil {
+		t.Fatalf("Resolve(lunar_return) error = %v", err)
+	}
+	if resolved.Synastry == nil {
+		t.Fatal("resolved.Synastry = nil for lunar return chart")
 	}
 }

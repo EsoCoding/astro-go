@@ -83,7 +83,7 @@ modern interpretive tools are optional modules, not the default foundation.
 - Language: Go
 - GUI: Fyne
 - Database: SQLite via `modernc.org/sqlite`
-- Ephemeris: Swiss Ephemeris via `github.com/mshafiee/swephgo`
+- Ephemeris: Swiss Ephemeris via `github.com/tejzpr/go-swisseph`
 - Chart rendering: Fyne custom canvas widgets, later shared renderer abstraction for PDF/SVG
 - PDF export: Go PDF generator such as `gofpdf` or `unidoc` after report layout is stable
 - Testing: Go unit tests, regression fixture tests, screenshot tests for chart rendering

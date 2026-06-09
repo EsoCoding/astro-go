@@ -17,8 +17,8 @@ func TestNatalChartCalculatesTraditionalPlanets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(chart.Planets) != len(astro.TraditionalPlanets) {
-		t.Fatalf("got %d planets, want %d", len(chart.Planets), len(astro.TraditionalPlanets))
+	if len(chart.Planets) < len(astro.TraditionalPlanets) {
+		t.Errorf("got %d planets, want at least %d", len(chart.Planets), len(astro.TraditionalPlanets))
 	}
 	if len(chart.Houses) != 12 {
 		t.Fatalf("got %d houses, want 12", len(chart.Houses))

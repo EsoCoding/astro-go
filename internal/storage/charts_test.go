@@ -47,10 +47,10 @@ func TestSQLiteChartStoreSaveListAndDelete(t *testing.T) {
 		UpdatedAtUTC:     time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC).Format(time.RFC3339),
 	}
 
-	if err := store.save(first, false); err != nil {
+	if err := store.save(&first, false); err != nil {
 		t.Fatalf("save(first) error = %v", err)
 	}
-	if err := store.save(second, false); err != nil {
+	if err := store.save(&second, false); err != nil {
 		t.Fatalf("save(second) error = %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestSQLiteChartStoreSaveListAndDelete(t *testing.T) {
 	}
 
 	first.Name = "First Chart Updated"
-	if err := store.Save(first); err != nil {
+	if err := store.Save(&first); err != nil {
 		t.Fatalf("Save(update) error = %v", err)
 	}
 	charts, err = store.List()

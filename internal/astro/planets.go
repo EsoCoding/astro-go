@@ -9,10 +9,18 @@ const (
 	Venus   Planet = "Venus"
 	Mars    Planet = "Mars"
 	Jupiter Planet = "Jupiter"
-	Saturn  Planet = "Saturn"
+	Saturn       Planet = "Saturn"
+	Uranus       Planet = "Uranus"
+	Neptune      Planet = "Neptune"
+	Pluto        Planet = "Pluto"
+	NorthNode    Planet = "NorthNode"
+	SouthNode    Planet = "SouthNode"
+	Chiron       Planet = "Chiron"
+	ParsFortunae Planet = "ParsFortunae"
 )
 
 var TraditionalPlanets = []Planet{Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn}
+var ModernPlanets = []Planet{Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, NorthNode, SouthNode, Chiron, ParsFortunae}
 
 var planetGlyphs = map[Planet]string{
 	Sun:     "Q",
@@ -21,7 +29,14 @@ var planetGlyphs = map[Planet]string{
 	Venus:   "R",
 	Mars:    "T",
 	Jupiter: "Y",
-	Saturn:  "U",
+	Saturn:       "U",
+	Uranus:       "I",
+	Neptune:      "O",
+	Pluto:        "P",
+	NorthNode:    "\u008b",
+	SouthNode:    "\u008c",
+	Chiron:       "M",
+	ParsFortunae: "<",
 }
 
 func (p Planet) Glyph() string {

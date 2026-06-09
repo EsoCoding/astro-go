@@ -37,24 +37,13 @@ The advanced traditional astrology product specification is documented in:
 
 ## Swiss Ephemeris
 
-This project uses `github.com/mshafiee/swephgo`, which is a cgo binding to the
-native Swiss Ephemeris library. The local shared library is stored at:
-
-```text
-third_party/swisseph/lib/libswe.so
-```
+This project uses `github.com/tejzpr/go-swisseph`, which compiles the Swiss
+Ephemeris C sources through cgo. It does not need a local desktop `libswe.so`.
 
 Run the terminal smoke test with:
 
 ```sh
 make sweph-smoke
-```
-
-To make direct `go test ./...` and `go run ./cmd/sweph-smoke` commands work
-without the Makefile, configure Go's cgo linker flags once:
-
-```sh
-go env -w CGO_LDFLAGS="-L$(pwd)/third_party/swisseph/lib -Wl,-rpath,$(pwd)/third_party/swisseph/lib -L$(pwd)/third_party/system/lib"
 ```
 
 Swiss Ephemeris has separate license terms. Review

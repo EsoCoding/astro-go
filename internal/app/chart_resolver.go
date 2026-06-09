@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -44,12 +45,13 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 			return ResolvedChart{}, err
 		}
 		return ResolvedChart{Single: &chart}, nil
+
 	case astro.ChartTypeTransit:
 		base, ok := findSavedChart(charts, saved.BaseChartID)
 		if !ok {
 			return ResolvedChart{}, fmt.Errorf("base chart not found for transit definition")
 		}
-		baseData, err := birthDataFromSaved(base)
+		natalData, err := birthDataFromSaved(base)
 		if err != nil {
 			return ResolvedChart{}, err
 		}
@@ -57,23 +59,210 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
-		baseData.Name = saved.Name
-		baseData.DateTimeUTC = referenceTime
-		baseData.ChartType = astro.ChartTypeTransit
-		if baseData.TimezoneName != "" {
-			loc, err := time.LoadLocation(baseData.TimezoneName)
+		innerChart, err := r.calculator.NatalChart(natalData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		transitData := natalData
+		transitData.Name = "Transits"
+		transitData.DateTimeUTC = referenceTime
+		transitData.ChartType = astro.ChartTypeTransit
+		if transitData.TimezoneName != "" {
+			loc, err := time.LoadLocation(transitData.TimezoneName)
 			if err == nil {
 				localRef := referenceTime.In(loc)
 				_, offsetSec := localRef.Zone()
 				offsetHours := float64(offsetSec) / 3600.0
-				baseData.UTCOffset = fmt.Sprintf("%g", offsetHours)
+				transitData.UTCOffset = fmt.Sprintf("%g", offsetHours)
 			}
 		}
-		chart, err := r.calculator.NatalChart(baseData)
+		outerChart, err := r.calculator.NatalChart(transitData)
 		if err != nil {
 			return ResolvedChart{}, err
 		}
-		return ResolvedChart{Single: &chart}, nil
+
+		synastry := astro.SynastryChart{
+			Name:         saved.Name,
+			InnerChart:   innerChart,
+			OuterChart:   outerChart,
+			InterAspects: astro.TraditionalInterAspects(innerChart.Planets, outerChart.Planets),
+		}
+		return ResolvedChart{Synastry: &synastry}, nil
+
+	case astro.ChartTypeSecondaryProgression:
+		base, ok := findSavedChart(charts, saved.BaseChartID)
+		if !ok {
+			return ResolvedChart{}, fmt.Errorf("base chart not found for progression definition")
+		}
+		natalData, err := birthDataFromSaved(base)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		referenceTime, err := referenceTimeFromSaved(saved)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		innerChart, err := r.calculator.NatalChart(natalData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		natalTime := natalData.DateTimeUTC
+		duration := referenceTime.Sub(natalTime)
+		progressedDuration := time.Duration(float64(duration) / 365.242199)
+		progressedTime := natalTime.Add(progressedDuration)
+
+		progressedData := natalData
+		progressedData.Name = "Progressed"
+		progressedData.DateTimeUTC = progressedTime
+		progressedData.ChartType = astro.ChartTypeSecondaryProgression
+		outerChart, err := r.calculator.NatalChart(progressedData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		synastry := astro.SynastryChart{
+			Name:         saved.Name,
+			InnerChart:   innerChart,
+			OuterChart:   outerChart,
+			InterAspects: astro.TraditionalInterAspects(innerChart.Planets, outerChart.Planets),
+		}
+		return ResolvedChart{Synastry: &synastry}, nil
+
+	case astro.ChartTypeSolarArc:
+		base, ok := findSavedChart(charts, saved.BaseChartID)
+		if !ok {
+			return ResolvedChart{}, fmt.Errorf("base chart not found for solar arc definition")
+		}
+		natalData, err := birthDataFromSaved(base)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		referenceTime, err := referenceTimeFromSaved(saved)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		innerChart, err := r.calculator.NatalChart(natalData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		natalTime := natalData.DateTimeUTC
+		duration := referenceTime.Sub(natalTime)
+		progressedDuration := time.Duration(float64(duration) / 365.242199)
+		progressedTime := natalTime.Add(progressedDuration)
+
+		progressedData := natalData
+		progressedData.DateTimeUTC = progressedTime
+		progressedChart, err := r.calculator.NatalChart(progressedData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		var natalSun, progressedSun float64
+		for _, p := range innerChart.Planets {
+			if p.Planet == astro.Sun {
+				natalSun = p.Longitude
+			}
+		}
+		for _, p := range progressedChart.Planets {
+			if p.Planet == astro.Sun {
+				progressedSun = p.Longitude
+			}
+		}
+
+		arc := astro.NormalizeDegrees(progressedSun - natalSun)
+
+		outerChart := innerChart
+		outerChart.ChartType = astro.ChartTypeSolarArc
+		outerChart.Planets = make([]astro.PlanetPosition, len(innerChart.Planets))
+		for i, p := range innerChart.Planets {
+			shiftedLong := astro.NormalizeDegrees(p.Longitude + arc)
+			outerChart.Planets[i] = astro.PlanetPosition{
+				Planet:          p.Planet,
+				Longitude:       shiftedLong,
+				Latitude:        p.Latitude,
+				Speed:           p.Speed,
+				Sign:            astro.SignFromLongitude(shiftedLong),
+				DegreeInSign:    astro.DegreeInSign(shiftedLong),
+				House:           p.House,
+				Retrograde:      p.Retrograde,
+				DomicileRuler:   astro.DomicileRuler(astro.SignFromLongitude(shiftedLong)),
+				EssentialStatus: astro.EssentialStatus(p.Planet, astro.SignFromLongitude(shiftedLong)),
+			}
+		}
+
+		synastry := astro.SynastryChart{
+			Name:         saved.Name,
+			InnerChart:   innerChart,
+			OuterChart:   outerChart,
+			InterAspects: astro.TraditionalInterAspects(innerChart.Planets, outerChart.Planets),
+		}
+		return ResolvedChart{Synastry: &synastry}, nil
+
+	case astro.ChartTypeSolarReturn:
+		base, ok := findSavedChart(charts, saved.BaseChartID)
+		if !ok {
+			return ResolvedChart{}, fmt.Errorf("base chart not found for solar return definition")
+		}
+		natalData, err := birthDataFromSaved(base)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		referenceTime, err := referenceTimeFromSaved(saved)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		innerChart, err := r.calculator.NatalChart(natalData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		outerChart, err := r.calculateSolarReturn(natalData, referenceTime)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		synastry := astro.SynastryChart{
+			Name:         saved.Name,
+			InnerChart:   innerChart,
+			OuterChart:   outerChart,
+			InterAspects: astro.TraditionalInterAspects(innerChart.Planets, outerChart.Planets),
+		}
+		return ResolvedChart{Synastry: &synastry}, nil
+
+	case astro.ChartTypeLunarReturn:
+		base, ok := findSavedChart(charts, saved.BaseChartID)
+		if !ok {
+			return ResolvedChart{}, fmt.Errorf("base chart not found for lunar return definition")
+		}
+		natalData, err := birthDataFromSaved(base)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		referenceTime, err := referenceTimeFromSaved(saved)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		innerChart, err := r.calculator.NatalChart(natalData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		outerChart, err := r.calculateLunarReturn(natalData, referenceTime)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+
+		synastry := astro.SynastryChart{
+			Name:         saved.Name,
+			InnerChart:   innerChart,
+			OuterChart:   outerChart,
+			InterAspects: astro.TraditionalInterAspects(innerChart.Planets, outerChart.Planets),
+		}
+		return ResolvedChart{Synastry: &synastry}, nil
+
 	case astro.ChartTypeSynastry:
 		innerSaved, ok := findSavedChart(charts, saved.BaseChartID)
 		if !ok {
@@ -108,6 +297,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 			InterAspects: astro.TraditionalInterAspects(innerChart.Planets, outerChart.Planets),
 		}
 		return ResolvedChart{Synastry: &synastry}, nil
+
 	default:
 		return ResolvedChart{}, fmt.Errorf("%s calculation is not wired yet", chartType.String())
 	}
@@ -188,4 +378,116 @@ func findSavedChart(charts []storage.SavedChart, id string) (storage.SavedChart,
 		}
 	}
 	return storage.SavedChart{}, false
+}
+
+func (r ChartResolver) calculateSolarReturn(natalData astro.BirthData, referenceTime time.Time) (astro.Chart, error) {
+	natalChart, err := r.calculator.NatalChart(natalData)
+	if err != nil {
+		return astro.Chart{}, err
+	}
+	var natalSun float64
+	for _, p := range natalChart.Planets {
+		if p.Planet == astro.Sun {
+			natalSun = p.Longitude
+			break
+		}
+	}
+
+	natalBirthTime := natalData.DateTimeUTC
+	targetYear := referenceTime.Year()
+	guessTime := time.Date(targetYear, natalBirthTime.Month(), natalBirthTime.Day(), natalBirthTime.Hour(), natalBirthTime.Minute(), 0, 0, time.UTC)
+
+	currentTime := guessTime
+	for iter := 0; iter < 10; iter++ {
+		tempData := natalData
+		tempData.DateTimeUTC = currentTime
+		tempChart, err := r.calculator.NatalChart(tempData)
+		if err != nil {
+			return astro.Chart{}, err
+		}
+		var currentSun float64
+		for _, p := range tempChart.Planets {
+			if p.Planet == astro.Sun {
+				currentSun = p.Longitude
+				break
+			}
+		}
+
+		diff := astro.NormalizeDegrees(currentSun - natalSun)
+		if diff > 180 {
+			diff -= 360
+		}
+		if math.Abs(diff) < 0.00001 {
+			break
+		}
+
+		deltaHours := diff / 0.0410686
+		currentTime = currentTime.Add(time.Duration(deltaHours * float64(time.Hour)))
+	}
+
+	return r.calculator.NatalChart(astro.BirthData{
+		Name:             "Solar Return",
+		DateTimeUTC:      currentTime,
+		LocationName:     natalData.LocationName,
+		LatitudeDegrees:  natalData.LatitudeDegrees,
+		LongitudeDegrees: natalData.LongitudeDegrees,
+		HouseSystem:      natalData.HouseSystem,
+		UTCOffset:        natalData.UTCOffset,
+		TimezoneName:     natalData.TimezoneName,
+		ChartType:        astro.ChartTypeSolarReturn,
+	})
+}
+
+func (r ChartResolver) calculateLunarReturn(natalData astro.BirthData, referenceTime time.Time) (astro.Chart, error) {
+	natalChart, err := r.calculator.NatalChart(natalData)
+	if err != nil {
+		return astro.Chart{}, err
+	}
+	var natalMoon float64
+	for _, p := range natalChart.Planets {
+		if p.Planet == astro.Moon {
+			natalMoon = p.Longitude
+			break
+		}
+	}
+
+	currentTime := referenceTime
+	for iter := 0; iter < 15; iter++ {
+		tempData := natalData
+		tempData.DateTimeUTC = currentTime
+		tempChart, err := r.calculator.NatalChart(tempData)
+		if err != nil {
+			return astro.Chart{}, err
+		}
+		var currentMoon float64
+		for _, p := range tempChart.Planets {
+			if p.Planet == astro.Moon {
+				currentMoon = p.Longitude
+				break
+			}
+		}
+
+		diff := astro.NormalizeDegrees(currentMoon - natalMoon)
+		if diff > 180 {
+			diff -= 360
+		}
+		if math.Abs(diff) < 0.00001 {
+			break
+		}
+
+		deltaHours := diff / 0.549
+		currentTime = currentTime.Add(time.Duration(deltaHours * float64(time.Hour)))
+	}
+
+	return r.calculator.NatalChart(astro.BirthData{
+		Name:             "Lunar Return",
+		DateTimeUTC:      currentTime,
+		LocationName:     natalData.LocationName,
+		LatitudeDegrees:  natalData.LatitudeDegrees,
+		LongitudeDegrees: natalData.LongitudeDegrees,
+		HouseSystem:      natalData.HouseSystem,
+		UTCOffset:        natalData.UTCOffset,
+		TimezoneName:     natalData.TimezoneName,
+		ChartType:        astro.ChartTypeLunarReturn,
+	})
 }

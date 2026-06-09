@@ -3,7 +3,8 @@ module astro-go
 go 1.26.4
 
 require (
-	github.com/mshafiee/swephgo v1.1.0
+	github.com/ringsaturn/tzf v1.2.1
+	github.com/tejzpr/go-swisseph v1.0.2
 	modernc.org/sqlite v1.52.0
 )
 
@@ -14,7 +15,6 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/ringsaturn/tzf v1.2.1 // indirect
 	github.com/ringsaturn/tzf-dist v0.0.2026-b-fix1 // indirect
 	github.com/tidwall/geoindex v1.7.0 // indirect
 	github.com/tidwall/rtree v1.10.0 // indirect

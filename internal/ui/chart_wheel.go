@@ -71,11 +71,7 @@ func (r *chartWheelRenderer) Destroy() {}
 
 func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	palette := currentChartPalette()
-	infoPanelWidth := 0.0
-	if size.Width > size.Height*1.08 {
-		infoPanelWidth = clamp(float64(size.Width)*0.28, 220, 320)
-	}
-	wheelAreaWidth := float64(size.Width) - infoPanelWidth
+	wheelAreaWidth := float64(size.Width)
 	drawSize := math.Min(wheelAreaWidth, float64(size.Height)) - 24
 	if drawSize < 180 {
 		drawSize = 180
@@ -84,7 +80,7 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	centerX := wheelAreaWidth * 0.5
 	centerY := float64(size.Height) / 2
 	outer := drawSize * 0.47
-	zodiacInner := drawSize * 0.39
+	zodiacInner := drawSize * 0.415
 	planetExactRadius := zodiacInner
 	planetRadius := zodiacInner - drawSize*0.05
 	houseOuter := drawSize * 0.255
@@ -92,7 +88,7 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	houseNumberRadius := houseInner + (houseOuter-houseInner)*0.58
 	aspectOuter := houseInner
 	aspectRadius := aspectOuter
-	signRadius := drawSize * 0.43
+	signRadius := (outer + zodiacInner) * 0.5
 	ascendant := chart.Ascendant.Longitude
 	signTextSize := float32(clamp(drawSize*0.039, 12, 22))
 	planetTextSize := float32(clamp(drawSize*0.043, 13, 24))
@@ -102,10 +98,12 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 
 	objects := []fyne.CanvasObject{
 		background(size, palette.background),
+		filledCircle(centerX, centerY, outer, color.NRGBA{R: 246, G: 241, B: 229, A: 255}, color.Transparent, 0),
+		filledCircle(centerX, centerY, zodiacInner, palette.background, color.Transparent, 0),
 		circle(centerX, centerY, outer, palette.wheel, 2),
 		circle(centerX, centerY, zodiacInner, palette.wheel, 2),
-		circle(centerX, centerY, houseOuter, palette.wheel, 1.2),
-		circle(centerX, centerY, houseInner, palette.wheel, 1.2),
+		circle(centerX, centerY, houseOuter, palette.wheel, 2),
+		circle(centerX, centerY, houseInner, palette.wheel, 2),
 		circle(centerX, centerY, aspectOuter, palette.subtle, 1),
 	}
 
@@ -153,7 +151,7 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 		longitude := house.CuspLongitude
 		width := float32(1)
 		if len(chart.Houses) == 12 && (house.Number == 1 || house.Number == 4 || house.Number == 7 || house.Number == 10) {
-			width = 2
+			width = 3
 		}
 		x1, y1 := chartPoint(centerX, centerY, houseInner, longitude, ascendant)
 		x2, y2 := chartPoint(centerX, centerY, zodiacInner, longitude, ascendant)
@@ -176,18 +174,14 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	}{
 		{"ASC", chart.Ascendant.Longitude, palette.accent},
 		{"DSC", astro.NormalizeDegrees(chart.Ascendant.Longitude + 180), palette.accent},
-		{"MC", chart.MC.Longitude, palette.secondaryAccent},
-		{"IC", astro.NormalizeDegrees(chart.MC.Longitude + 180), palette.secondaryAccent},
+		{"MC", chart.MC.Longitude, palette.accent},
+		{"IC", astro.NormalizeDegrees(chart.MC.Longitude + 180), palette.accent},
 	} {
 		x1, y1 := chartPoint(centerX, centerY, houseInner, marker.longitude, ascendant)
 		lineOuterRadius := outer + drawSize*0.035
 		labelOuterRadius := outer + drawSize*0.055
-		if marker.label == "ASC" || marker.label == "DSC" {
-			lineOuterRadius = outer + drawSize*0.018
-			labelOuterRadius = lineOuterRadius
-		}
 		x2, y2 := chartPoint(centerX, centerY, lineOuterRadius, marker.longitude, ascendant)
-		objects = append(objects, line(x1, y1, x2, y2, marker.color, 2))
+		objects = append(objects, line(x1, y1, x2, y2, marker.color, 3))
 		lx, ly := chartPoint(centerX, centerY, labelOuterRadius, marker.longitude, ascendant)
 		label := canvas.NewText(marker.label, marker.color)
 		label.TextSize = houseTextSize
@@ -215,8 +209,6 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 		objects = append(objects, filledCircle(x1, y1, drawSize*0.0038, palette.background, aspectStroke, 0.8))
 		objects = append(objects, filledCircle(x2, y2, drawSize*0.0038, palette.background, aspectStroke, 0.8))
 		midX, midY := (x1+x2)/2, (y1+y2)/2
-		symbolBackground := filledCircle(midX, midY, float64(aspectTextSize)*0.62, palette.background, palette.subtle, 0.4)
-		objects = append(objects, symbolBackground)
 		symbol := canvas.NewText(aspectGlyph(aspect.Type), aspectStroke)
 		symbol.TextSize = aspectTextSize
 		symbol.FontSource = assets.HamburgSymbolsFont
@@ -229,10 +221,6 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 		gx, gy := chartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant)
 		objects = append(objects, line(ex, ey, gx, gy, planetColor(placement.position.Planet, palette), 0.8))
 		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, planetColor(placement.position.Planet, palette), planetColor(placement.position.Planet, palette), 0.5))
-
-		// Draw a background masking circle to prevent lines (like house cusps) from overlapping the glyph
-		maskRadius := float64(planetTextSize) * 0.65
-		objects = append(objects, filledCircle(gx, gy, maskRadius, palette.background, color.Transparent, 0))
 
 		text := canvas.NewText(placement.position.Planet.Glyph(), planetColor(placement.position.Planet, palette))
 		text.TextSize = planetTextSize
@@ -247,15 +235,13 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	ascText.Move(fyne.NewPos(float32(centerX-outer), float32(centerY+outer+float64(coordTextSize)*0.4)))
 	objects = append(objects, ascText)
 
-	mcText := canvas.NewText(fmt.Sprintf("MC %s", formatZodiacDMS(chart.MC.Longitude)), palette.secondaryAccent)
+	mcText := canvas.NewText(fmt.Sprintf("MC %s", formatZodiacDMS(chart.MC.Longitude)), palette.accent)
 	mcText.TextSize = coordTextSize
 	mcText.FontSource = assets.CourierFont
 	mcText.Move(fyne.NewPos(float32(centerX-outer), float32(centerY+outer+float64(coordTextSize)*1.9)))
 	objects = append(objects, mcText)
 
-	if infoPanelWidth > 0 {
-		objects = append(objects, inCanvasPositions(chart, palette, wheelAreaWidth, float64(size.Height))...)
-	}
+	objects = append(objects, inCanvasChartInfo(chart, palette, size)...)
 
 	return objects
 }
@@ -302,37 +288,10 @@ func currentChartPalette() chartPalette {
 
 func darkChartPalette() chartPalette {
 	return chartPalette{
-		background:      color.NRGBA{R: 18, G: 22, B: 28, A: 255},
-		wheel:           color.NRGBA{R: 88, G: 97, B: 112, A: 255},
-		subtle:          color.NRGBA{R: 64, G: 72, B: 86, A: 255},
-		sign:            color.NRGBA{R: 144, G: 158, B: 183, A: 230},
-		planet:          color.NRGBA{R: 231, G: 220, B: 188, A: 255},
-		sun:             color.NRGBA{R: 238, G: 172, B: 75, A: 255},
-		moon:            color.NRGBA{R: 196, G: 214, B: 233, A: 255},
-		mercury:         color.NRGBA{R: 130, G: 182, B: 216, A: 255},
-		venus:           color.NRGBA{R: 115, G: 185, B: 137, A: 255},
-		mars:            color.NRGBA{R: 220, G: 99, B: 88, A: 255},
-		jupiter:         color.NRGBA{R: 210, G: 168, B: 92, A: 255},
-		saturn:          color.NRGBA{R: 159, G: 151, B: 134, A: 255},
-		house:           color.NRGBA{R: 187, G: 116, B: 88, A: 210},
-		houseNumber:     color.NRGBA{R: 180, G: 188, B: 203, A: 230},
-		tick:            color.NRGBA{R: 65, G: 72, B: 82, A: 150},
-		accent:          color.NRGBA{R: 230, G: 132, B: 106, A: 255},
-		secondaryAccent: color.NRGBA{R: 122, G: 177, B: 219, A: 255},
-		easyAspect:      color.NRGBA{R: 74, G: 154, B: 113, A: 190},
-		hardAspect:      color.NRGBA{R: 210, G: 82, B: 76, A: 190},
-		neutralAspect:   color.NRGBA{R: 136, G: 142, B: 153, A: 130},
-		text:            color.NRGBA{R: 231, G: 234, B: 239, A: 255},
-		mutedText:       color.NRGBA{R: 166, G: 175, B: 189, A: 235},
-	}
-}
-
-func lightChartPalette() chartPalette {
-	return chartPalette{
-		background:      color.NRGBA{R: 248, G: 248, B: 245, A: 255},
-		wheel:           color.NRGBA{R: 61, G: 67, B: 77, A: 255},
-		subtle:          color.NRGBA{R: 157, G: 165, B: 175, A: 255},
-		sign:            color.NRGBA{R: 68, G: 78, B: 92, A: 255},
+		background:      color.NRGBA{R: 255, G: 255, B: 255, A: 255},
+		wheel:           color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		subtle:          color.NRGBA{R: 100, G: 110, B: 120, A: 255},
+		sign:            color.NRGBA{R: 0, G: 0, B: 0, A: 255},
 		planet:          color.NRGBA{R: 38, G: 44, B: 52, A: 255},
 		sun:             color.NRGBA{R: 184, G: 115, B: 33, A: 255},
 		moon:            color.NRGBA{R: 74, G: 93, B: 116, A: 255},
@@ -341,9 +300,9 @@ func lightChartPalette() chartPalette {
 		mars:            color.NRGBA{R: 178, G: 55, B: 48, A: 255},
 		jupiter:         color.NRGBA{R: 153, G: 104, B: 35, A: 255},
 		saturn:          color.NRGBA{R: 87, G: 82, B: 73, A: 255},
-		house:           color.NRGBA{R: 152, G: 83, B: 58, A: 220},
-		houseNumber:     color.NRGBA{R: 63, G: 70, B: 82, A: 230},
-		tick:            color.NRGBA{R: 174, G: 180, B: 188, A: 170},
+		house:           color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		houseNumber:     color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		tick:            color.NRGBA{R: 0, G: 0, B: 0, A: 255},
 		accent:          color.NRGBA{R: 165, G: 60, B: 45, A: 255},
 		secondaryAccent: color.NRGBA{R: 42, G: 96, B: 138, A: 255},
 		easyAspect:      color.NRGBA{R: 42, G: 128, B: 87, A: 190},
@@ -354,13 +313,38 @@ func lightChartPalette() chartPalette {
 	}
 }
 
-func inCanvasPositions(chart astro.Chart, palette chartPalette, wheelAreaWidth, height float64) []fyne.CanvasObject {
-	x := wheelAreaWidth + 12
+func lightChartPalette() chartPalette {
+	return chartPalette{
+		background:      color.NRGBA{R: 255, G: 255, B: 255, A: 255},
+		wheel:           color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		subtle:          color.NRGBA{R: 100, G: 110, B: 120, A: 255},
+		sign:            color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		planet:          color.NRGBA{R: 38, G: 44, B: 52, A: 255},
+		sun:             color.NRGBA{R: 184, G: 115, B: 33, A: 255},
+		moon:            color.NRGBA{R: 74, G: 93, B: 116, A: 255},
+		mercury:         color.NRGBA{R: 42, G: 108, B: 149, A: 255},
+		venus:           color.NRGBA{R: 48, G: 128, B: 80, A: 255},
+		mars:            color.NRGBA{R: 178, G: 55, B: 48, A: 255},
+		jupiter:         color.NRGBA{R: 153, G: 104, B: 35, A: 255},
+		saturn:          color.NRGBA{R: 87, G: 82, B: 73, A: 255},
+		house:           color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		houseNumber:     color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		tick:            color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		accent:          color.NRGBA{R: 165, G: 60, B: 45, A: 255},
+		secondaryAccent: color.NRGBA{R: 42, G: 96, B: 138, A: 255},
+		easyAspect:      color.NRGBA{R: 42, G: 128, B: 87, A: 190},
+		hardAspect:      color.NRGBA{R: 186, G: 55, B: 51, A: 190},
+		neutralAspect:   color.NRGBA{R: 110, G: 116, B: 125, A: 130},
+		text:            color.NRGBA{R: 40, G: 46, B: 55, A: 255},
+		mutedText:       color.NRGBA{R: 99, G: 107, B: 119, A: 240},
+	}
+}
+
+func inCanvasChartInfo(chart astro.Chart, palette chartPalette, size fyne.Size) []fyne.CanvasObject {
+	x := 12.0
 	y := 18.0
-	width := 230.0
 	headerSize := float32(12)
 	bodySize := float32(10)
-	lineHeight := 18.0
 
 	localTime := chart.DateTimeUTC
 	zoneAbbr := "UTC"
@@ -406,57 +390,28 @@ func inCanvasPositions(chart astro.Chart, palette chartPalette, wheelAreaWidth, 
 	}
 
 	objects := []fyne.CanvasObject{
-		panelBlock(x, 12, width, height-24, palette),
-		textAt(chart.Name, palette.text, headerSize+2, x+10, y, true, assets.CourierFont),
+		textAt(chart.Name, palette.text, headerSize+2, x, y, true, assets.CourierFont),
 	}
 	y += 18
-	objects = append(objects, textAt(subtitle, palette.text, bodySize, x+10, y, true, assets.CourierFont))
+	objects = append(objects, textAt(subtitle, palette.text, bodySize, x, y, true, assets.CourierFont))
 	y += 16
-	objects = append(objects, textAt(localTime.Format("2 Jan 2006, Mon"), palette.mutedText, bodySize, x+10, y, false, assets.CourierFont))
+	objects = append(objects, textAt(localTime.Format("2 Jan 2006, Mon"), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
 	y += 14
-	objects = append(objects, textAt(fmt.Sprintf("%s %s %s", localTime.Format("15:04:05"), zoneAbbr, formattedOffset), palette.mutedText, bodySize, x+10, y, false, assets.CourierFont))
+	objects = append(objects, textAt(fmt.Sprintf("%s %s %s", localTime.Format("15:04:05"), zoneAbbr, formattedOffset), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
 	y += 14
-	objects = append(objects, textAt(shortenLocationName(chart.LocationName), palette.text, bodySize, x+10, y, false, assets.CourierFont))
+	objects = append(objects, textAt(shortenLocationName(chart.LocationName), palette.text, bodySize, x, y, false, assets.CourierFont))
 	y += 14
-	objects = append(objects, textAt(formatCoordsDMS(chart.Latitude, chart.Longitude), palette.text, bodySize, x+10, y, false, assets.CourierFont))
+	objects = append(objects, textAt(formatCoordsDMS(chart.Latitude, chart.Longitude), palette.text, bodySize, x, y, false, assets.CourierFont))
 	y += 18
 
 	// Calculation settings (in italics)
-	objects = append(objects, textAtItalic("Geocentric", palette.mutedText, bodySize-1, x+10, y, true, assets.CourierFont))
+	objects = append(objects, textAtItalic("Geocentric", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
 	y += 12
-	objects = append(objects, textAtItalic("Tropical", palette.mutedText, bodySize-1, x+10, y, true, assets.CourierFont))
+	objects = append(objects, textAtItalic("Tropical", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
 	y += 12
-	objects = append(objects, textAtItalic(chart.HouseSystem.Label(), palette.mutedText, bodySize-1, x+10, y, true, assets.CourierFont))
+	objects = append(objects, textAtItalic(chart.HouseSystem.Label(), palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
 	y += 12
-	objects = append(objects, textAtItalic("Mean Node", palette.mutedText, bodySize-1, x+10, y, true, assets.CourierFont))
-	y += 20
-
-	objects = append(objects, textAt("Planets", palette.text, headerSize, x+10, y, true, assets.CourierFont))
-	y += 18
-	for _, position := range chart.Planets {
-		row := fmt.Sprintf("%-4s %17s H%-2d %s%s",
-			shortPlanetName(position.Planet),
-			formatZodiacDMS(position.Longitude),
-			position.House,
-			position.EssentialStatus,
-			retrogradeMarker(position.Retrograde),
-		)
-		objects = append(objects, textAt(row, planetColor(position.Planet, palette), bodySize, x+10, y, false, assets.CourierFont))
-		y += lineHeight
-	}
-
-	y += 8
-	objects = append(objects, textAt("Houses", palette.text, headerSize, x+10, y, true, assets.CourierFont))
-	y += 18
-	for i, house := range chart.Houses {
-		if i == 18 && len(chart.Houses) > 18 {
-			objects = append(objects, textAt(fmt.Sprintf("+%d more", len(chart.Houses)-i), palette.mutedText, bodySize, x+10, y, false, assets.CourierFont))
-			break
-		}
-		row := fmt.Sprintf("H%-2d %17s %s", house.Number, formatZodiacDMS(house.CuspLongitude), shortPlanetName(house.Ruler))
-		objects = append(objects, textAt(row, palette.mutedText, bodySize, x+10, y, false, assets.CourierFont))
-		y += lineHeight
-	}
+	objects = append(objects, textAtItalic("Mean Node", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
 
 	return objects
 }
@@ -520,9 +475,7 @@ func houseLabelLongitude(houses []astro.House, index int) float64 {
 	}
 	current := houses[index].CuspLongitude
 	next := houses[(index+1)%len(houses)].CuspLongitude
-	if index == len(houses)-1 {
-		next += 360
-	} else if next < current {
+	if next < current {
 		next += 360
 	}
 	return astro.NormalizeDegrees(current + (next-current)/2)
@@ -613,14 +566,9 @@ func planetPlacements(planets []astro.PlanetPosition, baseRadius, step float64) 
 		} else {
 			clusterDepth++
 		}
-		offsetSign := 1.0
-		if clusterDepth%2 == 1 {
-			offsetSign = -1
-		}
-		offsetMagnitude := float64((clusterDepth + 1) / 2)
 		placements = append(placements, planetPlacement{
 			position: position,
-			radius:   baseRadius + offsetSign*offsetMagnitude*step,
+			radius:   baseRadius - float64(clusterDepth)*step,
 		})
 		previousLongitude = position.Longitude
 	}
