@@ -213,7 +213,6 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 				}
 			}
 		}
-
 		referenceTime, err := referenceTimeFromSaved(saved)
 		if err != nil {
 			return ResolvedChart{}, err
@@ -249,7 +248,6 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 				}
 			}
 		}
-
 		referenceTime, err := referenceTimeFromSaved(saved)
 		if err != nil {
 			return ResolvedChart{}, err

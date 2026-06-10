@@ -12,8 +12,8 @@ func TestEnigmaPlanetGlyphs(t *testing.T) {
 		want   string
 	}{
 		{astro.Sun, "\uE200"},
-		{astro.NorthNode, "\uE520"},
-		{astro.SouthNode, "\uE521"},
+		{astro.NorthNode, "\uE525"},
+		{astro.SouthNode, "\uE526"},
 		{astro.ParsFortunae, "\uF400"},
 	}
 
