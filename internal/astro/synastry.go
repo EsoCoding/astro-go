@@ -16,6 +16,8 @@ type SynastryChart struct {
 }
 
 func TraditionalInterAspects(inner []PlanetPosition, outer []PlanetPosition) []InterAspect {
+	inner = AspectablePositions(inner)
+	outer = AspectablePositions(outer)
 	var aspects []InterAspect
 	for i := 0; i < len(inner); i++ {
 		for j := 0; j < len(outer); j++ {

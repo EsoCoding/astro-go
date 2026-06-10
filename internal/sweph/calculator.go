@@ -49,7 +49,7 @@ func (Calculator) NatalChart(data astro.BirthData) (astro.Chart, error) {
 	if err != nil {
 		return astro.Chart{}, err
 	}
-	planets, err := planetPositions(julianDay, data.LatitudeDegrees, asc, armc, eps, houseSystem)
+	planets, err := planetPositions(julianDay, data.LatitudeDegrees, asc, armc, eps, houseSystem, data.EnabledObjects)
 	if err != nil {
 		return astro.Chart{}, err
 	}
@@ -122,127 +122,200 @@ func obliquity(julianDay float64) (float64, error) {
 	return result.Data[0], nil
 }
 
-func planetPositions(julianDay, latitude, asc, armc, eps float64, houseSystem astro.HouseSystem) ([]astro.PlanetPosition, error) {
-	swephIDs := map[astro.Planet]int32{
-		astro.Sun:       swisseph.Sun,
-		astro.Moon:      swisseph.Moon,
-		astro.Mercury:   swisseph.Mercury,
-		astro.Venus:     swisseph.Venus,
-		astro.Mars:      swisseph.Mars,
-		astro.Jupiter:   swisseph.Jupiter,
-		astro.Saturn:    swisseph.Saturn,
-		astro.Uranus:    swisseph.Uranus,
-		astro.Neptune:   swisseph.Neptune,
-		astro.Pluto:     swisseph.Pluto,
-		astro.NorthNode: swisseph.TrueNode,
-		astro.Chiron:    swisseph.Chiron,
-	}
-
+func planetPositions(julianDay, latitude, asc, armc, eps float64, houseSystem astro.HouseSystem, enabledObjects []astro.Planet) ([]astro.PlanetPosition, error) {
 	flags := int32(swisseph.FlagSwieph | swisseph.FlagSpeed)
-	positions := make([]astro.PlanetPosition, 0, len(astro.ModernPlanets))
+	enabled := astro.EnabledChartObjectSet(enabledObjects)
+	positions := make([]astro.PlanetPosition, 0, len(enabled))
+	calculated := map[astro.Planet]astro.PlanetPosition{}
 
-	var sunLong, moonLong float64
-
-	for _, planet := range astro.ModernPlanets {
-		if planet == astro.SouthNode || planet == astro.ParsFortunae {
-			continue // Handled manually below
-		}
-		result := swisseph.CalcUT(julianDay, swephIDs[planet], flags)
-		if result.Flag < 0 {
-			// If it's a traditional planet, fail. Otherwise, skip gracefully.
-			isTraditional := false
-			for _, tp := range astro.TraditionalPlanets {
-				if planet == tp {
-					isTraditional = true
-					break
-				}
-			}
-			if isTraditional {
-				return nil, fmt.Errorf("failed to calculate %s: %s", planet, result.Error)
-			}
+	for _, spec := range astro.ChartObjectCatalog() {
+		planet := spec.Planet
+		if !enabled[planet] || isManualPlanet(planet) {
 			continue
 		}
-
-		values := result.Data
-		longitude := astro.NormalizeDegrees(values[0])
-
-		if planet == astro.Sun {
-			sunLong = longitude
-		} else if planet == astro.Moon {
-			moonLong = longitude
-		}
-
-		sign := astro.SignFromLongitude(longitude)
-		house, err := planetHouse(longitude, values[1], latitude, armc, eps, houseSystem)
+		position, ok, err := calculatePlanetPosition(julianDay, latitude, armc, eps, houseSystem, planet, flags)
 		if err != nil {
 			return nil, err
 		}
-		positions = append(positions, astro.PlanetPosition{
-			Planet:          planet,
-			Longitude:       longitude,
-			Latitude:        values[1],
-			Speed:           values[3],
-			Sign:            sign,
-			DegreeInSign:    astro.DegreeInSign(longitude),
-			House:           house,
-			Retrograde:      values[3] < 0,
-			DomicileRuler:   astro.DomicileRuler(sign),
-			EssentialStatus: astro.EssentialStatus(planet, sign),
-		})
-	}
-
-	// Calculate South Node
-	var nnLong float64
-	for _, p := range positions {
-		if p.Planet == astro.NorthNode {
-			nnLong = p.Longitude
-			break
+		if !ok {
+			continue
 		}
+		calculated[planet] = position
+		positions = append(positions, position)
 	}
-	snLong := astro.NormalizeDegrees(nnLong + 180.0)
-	snSign := astro.SignFromLongitude(snLong)
-	snHouse, _ := planetHouse(snLong, 0, latitude, armc, eps, houseSystem) // 0 lat approx
 
-	positions = append(positions, astro.PlanetPosition{
-		Planet:          astro.SouthNode,
-		Longitude:       snLong,
-		Latitude:        0,
-		Speed:           0, // Approximate
-		Sign:            snSign,
-		DegreeInSign:    astro.DegreeInSign(snLong),
-		House:           snHouse,
-		Retrograde:      true, // Nodes are generally retrograde
-		DomicileRuler:   astro.DomicileRuler(snSign),
-		EssentialStatus: astro.EssentialStatus(astro.SouthNode, snSign),
-	})
-
-	// Calculate Part of Fortune using the same horizon test as astro-server-2:
-	// Sun 180-360 degrees counter-clockwise from ASC is above the horizon.
-	isDayChart := astro.NormalizeDegrees(sunLong-asc) >= 180
-
-	var pfLong float64
-	if isDayChart {
-		pfLong = astro.NormalizeDegrees(asc + moonLong - sunLong)
-	} else {
-		pfLong = astro.NormalizeDegrees(asc + sunLong - moonLong)
+	if enabled[astro.SouthNode] {
+		nodePlanet := astro.NorthNode
+		if enabled[astro.MeanSouthNode] && !enabled[astro.NorthNode] {
+			nodePlanet = astro.MeanNorthNode
+		}
+		northNode, err := calculatedOrHiddenPosition(calculated, julianDay, latitude, armc, eps, houseSystem, nodePlanet, flags)
+		if err != nil {
+			return nil, err
+		}
+		position := calculatedSouthNode(northNode, astro.SouthNode, latitude, armc, eps, houseSystem)
+		calculated[astro.SouthNode] = position
+		positions = append(positions, position)
 	}
-	pfSign := astro.SignFromLongitude(pfLong)
-	pfHouse, _ := planetHouse(pfLong, 0, latitude, armc, eps, houseSystem) // 0 lat approx
 
-	positions = append(positions, astro.PlanetPosition{
-		Planet:          astro.ParsFortunae,
-		Longitude:       pfLong,
-		Latitude:        0,
-		Speed:           0,
-		Sign:            pfSign,
-		DegreeInSign:    astro.DegreeInSign(pfLong),
-		House:           pfHouse,
-		Retrograde:      false,
-		DomicileRuler:   astro.DomicileRuler(pfSign),
-		EssentialStatus: astro.EssentialStatus(astro.ParsFortunae, pfSign),
-	})
+	if enabled[astro.MeanSouthNode] {
+		northNode, err := calculatedOrHiddenPosition(calculated, julianDay, latitude, armc, eps, houseSystem, astro.MeanNorthNode, flags)
+		if err != nil {
+			return nil, err
+		}
+		position := calculatedSouthNode(northNode, astro.MeanSouthNode, latitude, armc, eps, houseSystem)
+		calculated[astro.MeanSouthNode] = position
+		positions = append(positions, position)
+	}
+
+	if enabled[astro.ParsFortunae] {
+		sun, err := calculatedOrHiddenPosition(calculated, julianDay, latitude, armc, eps, houseSystem, astro.Sun, flags)
+		if err != nil {
+			return nil, err
+		}
+		moon, err := calculatedOrHiddenPosition(calculated, julianDay, latitude, armc, eps, houseSystem, astro.Moon, flags)
+		if err != nil {
+			return nil, err
+		}
+		position := calculatedParsFortunae(sun.Longitude, moon.Longitude, asc, latitude, armc, eps, houseSystem)
+		calculated[astro.ParsFortunae] = position
+		positions = append(positions, position)
+	}
 
 	return positions, nil
+}
+
+func calculatePlanetPosition(julianDay, latitude, armc, eps float64, houseSystem astro.HouseSystem, planet astro.Planet, flags int32) (astro.PlanetPosition, bool, error) {
+	swephID, ok := swephIDForPlanet(planet)
+	if !ok {
+		return astro.PlanetPosition{}, false, fmt.Errorf("no Swiss Ephemeris mapping for %s", planet)
+	}
+	result := swisseph.CalcUT(julianDay, swephID, flags)
+	if result.Flag < 0 {
+		if isRequiredPlanet(planet) {
+			return astro.PlanetPosition{}, false, fmt.Errorf("failed to calculate %s: %s", planet, result.Error)
+		}
+		return astro.PlanetPosition{}, false, nil
+	}
+	values := result.Data
+	longitude := astro.NormalizeDegrees(values[0])
+	position, err := positionFromValues(planet, longitude, values[1], values[3], latitude, armc, eps, houseSystem)
+	if err != nil {
+		if !isRequiredPlanet(planet) {
+			return astro.PlanetPosition{}, false, nil
+		}
+		return astro.PlanetPosition{}, false, err
+	}
+	return position, true, nil
+}
+
+func calculatedOrHiddenPosition(calculated map[astro.Planet]astro.PlanetPosition, julianDay, latitude, armc, eps float64, houseSystem astro.HouseSystem, planet astro.Planet, flags int32) (astro.PlanetPosition, error) {
+	if position, ok := calculated[planet]; ok {
+		return position, nil
+	}
+	position, ok, err := calculatePlanetPosition(julianDay, latitude, armc, eps, houseSystem, planet, flags)
+	if err != nil {
+		return astro.PlanetPosition{}, err
+	}
+	if !ok {
+		return astro.PlanetPosition{}, fmt.Errorf("failed to calculate required dependency %s", planet)
+	}
+	calculated[planet] = position
+	return position, nil
+}
+
+func calculatedSouthNode(northNode astro.PlanetPosition, planet astro.Planet, latitude, armc, eps float64, houseSystem astro.HouseSystem) astro.PlanetPosition {
+	longitude := astro.NormalizeDegrees(northNode.Longitude + 180.0)
+	position, _ := positionFromValues(planet, longitude, 0, northNode.Speed, latitude, armc, eps, houseSystem)
+	position.Retrograde = true
+	return position
+}
+
+func calculatedParsFortunae(sunLong, moonLong, asc, latitude, armc, eps float64, houseSystem astro.HouseSystem) astro.PlanetPosition {
+	isDayChart := astro.NormalizeDegrees(sunLong-asc) >= 180
+	longitude := astro.NormalizeDegrees(asc + moonLong - sunLong)
+	if !isDayChart {
+		longitude = astro.NormalizeDegrees(asc + sunLong - moonLong)
+	}
+	position, _ := positionFromValues(astro.ParsFortunae, longitude, 0, 0, latitude, armc, eps, houseSystem)
+	return position
+}
+
+func positionFromValues(planet astro.Planet, longitude, bodyLatitude, speed, geolat, armc, eps float64, houseSystem astro.HouseSystem) (astro.PlanetPosition, error) {
+	sign := astro.SignFromLongitude(longitude)
+	house, err := planetHouse(longitude, bodyLatitude, geolat, armc, eps, houseSystem)
+	if err != nil {
+		return astro.PlanetPosition{}, err
+	}
+	essentialStatus := ""
+	if spec, ok := astro.ChartObjectSpecFor(planet); ok && spec.HasDignity {
+		essentialStatus = astro.EssentialStatus(planet, sign)
+	}
+	return astro.PlanetPosition{
+		Planet:          planet,
+		Longitude:       longitude,
+		Latitude:        bodyLatitude,
+		Speed:           speed,
+		Sign:            sign,
+		DegreeInSign:    astro.DegreeInSign(longitude),
+		House:           house,
+		Retrograde:      speed < 0,
+		DomicileRuler:   astro.DomicileRuler(sign),
+		EssentialStatus: essentialStatus,
+	}, nil
+}
+
+func isManualPlanet(planet astro.Planet) bool {
+	return planet == astro.SouthNode || planet == astro.MeanSouthNode || planet == astro.ParsFortunae
+}
+
+func isRequiredPlanet(planet astro.Planet) bool {
+	for _, traditional := range astro.TraditionalPlanets {
+		if planet == traditional {
+			return true
+		}
+	}
+	return false
+}
+
+func swephIDForPlanet(planet astro.Planet) (int32, bool) {
+	swephIDs := map[astro.Planet]int32{
+		astro.Sun:                 swisseph.Sun,
+		astro.Moon:                swisseph.Moon,
+		astro.Mercury:             swisseph.Mercury,
+		astro.Venus:               swisseph.Venus,
+		astro.Mars:                swisseph.Mars,
+		astro.Jupiter:             swisseph.Jupiter,
+		astro.Saturn:              swisseph.Saturn,
+		astro.Uranus:              swisseph.Uranus,
+		astro.Neptune:             swisseph.Neptune,
+		astro.Pluto:               swisseph.Pluto,
+		astro.NorthNode:           swisseph.TrueNode,
+		astro.MeanNorthNode:       swisseph.MeanNode,
+		astro.BlackMoonLilith:     swisseph.MeanApog,
+		astro.TrueBlackMoonLilith: swisseph.OscuApog,
+		astro.Earth:               swisseph.Earth,
+		astro.Chiron:              swisseph.Chiron,
+		astro.Pholus:              swisseph.Pholus,
+		astro.Ceres:               swisseph.Ceres,
+		astro.Pallas:              swisseph.Pallas,
+		astro.Juno:                swisseph.Juno,
+		astro.Vesta:               swisseph.Vesta,
+		astro.Varuna:              swisseph.Varuna,
+		astro.Cupido:              swisseph.Cupido,
+		astro.Hades:               swisseph.Hades,
+		astro.Zeus:                swisseph.Zeus,
+		astro.Kronos:              swisseph.Kronos,
+		astro.Apollon:             swisseph.Apollon,
+		astro.Admetos:             swisseph.Admetos,
+		astro.Vulkanus:            swisseph.Vulkanus,
+		astro.Poseidon:            swisseph.Poseidon,
+		astro.Isis:                swisseph.Isis,
+		astro.WhiteMoon:           swisseph.WhiteMoon,
+		astro.Proserpina:          swisseph.Proserpina,
+	}
+	id, ok := swephIDs[planet]
+	return id, ok
 }
 
 func planetHouse(longitude, latitude, geolat, armc, eps float64, houseSystem astro.HouseSystem) (int, error) {

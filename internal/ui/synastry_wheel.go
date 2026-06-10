@@ -165,17 +165,17 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 
 		labelLong := longitude + 15
 		x, y := chartPoint(centerX, centerY, signRadius, labelLong, ascendant)
-		text := canvas.NewText(astro.Sign(i).Glyph(), palette.sign)
+		text := canvas.NewText(signGlyph(astro.Sign(i)), palette.sign)
 		text.TextSize = signTextSize
-		text.FontSource = assets.HamburgSymbolsFont
-		text.Move(fyne.NewPos(float32(x)-signTextSize/2, float32(y)-signTextSize*0.58))
+		text.FontSource = astrologyFont()
+		moveTextCentered(text, x, y)
 		objects = append(objects, text)
 
 		ox, oy := chartPoint(centerX, centerY, outerZodiacSignRadius, labelLong, ascendant)
-		outerText := canvas.NewText(astro.Sign(i).Glyph(), palette.sign)
+		outerText := canvas.NewText(signGlyph(astro.Sign(i)), palette.sign)
 		outerText.TextSize = signTextSize
-		outerText.FontSource = assets.HamburgSymbolsFont
-		outerText.Move(fyne.NewPos(float32(ox)-signTextSize/2, float32(oy)-signTextSize*0.58))
+		outerText.FontSource = astrologyFont()
+		moveTextCentered(outerText, ox, oy)
 		objects = append(objects, outerText)
 	}
 
@@ -252,8 +252,8 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		midX, midY := (x1+x2)/2, (y1+y2)/2
 		symbol := canvas.NewText(aspectGlyph(aspect.Type), stroke)
 		symbol.TextSize = aspectTextSize
-		symbol.FontSource = assets.HamburgSymbolsFont
-		symbol.Move(fyne.NewPos(float32(midX)-aspectTextSize*0.36, float32(midY)-aspectTextSize*0.58))
+		symbol.FontSource = astrologyFont()
+		moveTextCentered(symbol, midX, midY)
 		objects = append(objects, symbol)
 	}
 

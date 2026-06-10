@@ -139,10 +139,10 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 
 		labelLong := longitude + 15
 		x, y := chartPoint(centerX, centerY, signRadius, labelLong, ascendant)
-		text := canvas.NewText(astro.Sign(i).Glyph(), palette.sign)
+		text := canvas.NewText(signGlyph(astro.Sign(i)), palette.sign)
 		text.TextSize = signTextSize
-		text.FontSource = assets.HamburgSymbolsFont
-		text.Move(fyne.NewPos(float32(x)-signTextSize/2, float32(y)-signTextSize*0.58))
+		text.FontSource = astrologyFont()
+		moveTextCentered(text, x, y)
 		objects = append(objects, text)
 	}
 
@@ -211,8 +211,8 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 		midX, midY := (x1+x2)/2, (y1+y2)/2
 		symbol := canvas.NewText(aspectGlyph(aspect.Type), aspectStroke)
 		symbol.TextSize = aspectTextSize
-		symbol.FontSource = assets.HamburgSymbolsFont
-		symbol.Move(fyne.NewPos(float32(midX)-aspectTextSize*0.36, float32(midY)-aspectTextSize*0.58))
+		symbol.FontSource = astrologyFont()
+		moveTextCentered(symbol, midX, midY)
 		objects = append(objects, symbol)
 	}
 
@@ -516,6 +516,9 @@ func shortPlanetName(planet astro.Planet) string {
 	case astro.Saturn:
 		return "Sat"
 	default:
+		if spec, ok := astro.ChartObjectSpecFor(planet); ok {
+			return spec.Name
+		}
 		return string(planet)
 	}
 }
@@ -557,10 +560,10 @@ func planetLabelObjects(position astro.PlanetPosition, centerX, centerY, x, y fl
 	detailSize := detailTextSize * 0.82
 	objects := make([]fyne.CanvasObject, 0, 5)
 
-	glyph := canvas.NewText(position.Planet.Glyph(), clr)
+	glyph := canvas.NewText(planetGlyph(position.Planet), clr)
 	glyph.TextSize = planetTextSize
-	glyph.FontSource = assets.HamburgSymbolsFont
-	glyph.Move(fyne.NewPos(float32(x)-planetTextSize*0.48, float32(y)-planetTextSize*0.72))
+	glyph.FontSource = astrologyFont()
+	moveTextCentered(glyph, x, y)
 	objects = append(objects, glyph)
 
 	degrees, minutes := zodiacDegreeMinuteParts(position.Longitude)
@@ -577,10 +580,10 @@ func planetLabelObjects(position astro.PlanetPosition, centerX, centerY, x, y fl
 	degreeText.Move(centeredTextPosition(degreeX, degreeY, detailSize))
 	objects = append(objects, degreeText)
 
-	signText := canvas.NewText(astro.SignFromLongitude(position.Longitude).Glyph(), clr)
+	signText := canvas.NewText(signGlyph(astro.SignFromLongitude(position.Longitude)), clr)
 	signText.TextSize = detailSize * 1.05
-	signText.FontSource = assets.HamburgSymbolsFont
-	signText.Move(centeredTextPosition(signX, signY, detailSize*1.05))
+	signText.FontSource = astrologyFont()
+	moveTextCentered(signText, signX, signY)
 	objects = append(objects, signText)
 
 	minuteText := canvas.NewText(fmt.Sprintf("%02d", minutes), color.Black)
@@ -601,6 +604,11 @@ func planetLabelObjects(position astro.PlanetPosition, centerX, centerY, x, y fl
 
 func centeredTextPosition(x, y float64, textSize float32) fyne.Position {
 	return fyne.NewPos(float32(x)-textSize*0.58, float32(y)-textSize*0.5)
+}
+
+func moveTextCentered(text *canvas.Text, x, y float64) {
+	size := text.MinSize()
+	text.Move(fyne.NewPos(float32(x)-size.Width/2, float32(y)-size.Height/2))
 }
 
 func planetLineEndpoint(centerX, centerY, x, y, outwardOffset float64) (float64, float64) {
@@ -765,13 +773,10 @@ func fallbackPlanetCluster(cluster []astro.PlanetPosition, centerX, centerY, bas
 
 func planetPlacementCandidates(centerX, centerY, baseRadius, longitude, ascendant, step float64) []planetPlacementCandidate {
 	tangentOffsets := []float64{-step * 0.75, -step * 0.35, 0, step * 0.35, step * 0.75}
-	radialOffsets := []float64{0, -step * 0.18, -step * 0.35}
-	candidates := make([]planetPlacementCandidate, 0, len(tangentOffsets)*len(radialOffsets))
+	candidates := make([]planetPlacementCandidate, 0, len(tangentOffsets))
 	for _, tangentOffset := range tangentOffsets {
-		for _, radialOffset := range radialOffsets {
-			x, y := shiftedPoint(centerX, centerY, baseRadius, longitude, ascendant, tangentOffset, radialOffset)
-			candidates = append(candidates, planetPlacementCandidate{x: x, y: y})
-		}
+		x, y := shiftedPoint(centerX, centerY, baseRadius, longitude, ascendant, tangentOffset, 0)
+		candidates = append(candidates, planetPlacementCandidate{x: x, y: y})
 	}
 	return candidates
 }
@@ -888,23 +893,6 @@ func aspectColor(typ astro.AspectType, palette chartPalette) color.Color {
 		return palette.hardAspect
 	default:
 		return palette.neutralAspect
-	}
-}
-
-func aspectGlyph(typ astro.AspectType) string {
-	switch typ {
-	case astro.Conjunction:
-		return "q"
-	case astro.Sextile:
-		return "t"
-	case astro.Square:
-		return "r"
-	case astro.Trine:
-		return "e"
-	case astro.Opposition:
-		return "w"
-	default:
-		return "?"
 	}
 }
 

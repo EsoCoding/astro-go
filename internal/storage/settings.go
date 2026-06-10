@@ -1,24 +1,32 @@
 package storage
 
+import (
+	"encoding/json"
+
+	"astro-go/internal/astro"
+)
+
 type Settings struct {
-	DateFormat      string
-	TimeFormat      string
-	DefaultLocation string
-	DefaultLat      string
-	DefaultLng      string
-	NodePreference  string
-	PoFPreference   string
+	DateFormat          string
+	TimeFormat          string
+	DefaultLocation     string
+	DefaultLat          string
+	DefaultLng          string
+	NodePreference      string
+	PoFPreference       string
+	EnabledChartObjects []astro.Planet
 }
 
 func (s *ChartStore) GetSettings() (Settings, error) {
 	settings := Settings{
-		DateFormat:      "YYYY-MM-DD",
-		TimeFormat:      "24h",
-		DefaultLocation: "",
-		DefaultLat:      "",
-		DefaultLng:      "",
-		NodePreference:  "True",
-		PoFPreference:   "Day",
+		DateFormat:          "YYYY-MM-DD",
+		TimeFormat:          "24h",
+		DefaultLocation:     "",
+		DefaultLat:          "",
+		DefaultLng:          "",
+		NodePreference:      "True",
+		PoFPreference:       "Day",
+		EnabledChartObjects: astro.DefaultEnabledChartObjects(),
 	}
 
 	if s == nil || s.db == nil {
@@ -50,6 +58,11 @@ func (s *ChartStore) GetSettings() (Settings, error) {
 				settings.NodePreference = value
 			case "PoFPreference":
 				settings.PoFPreference = value
+			case "EnabledChartObjects":
+				var objects []astro.Planet
+				if err := json.Unmarshal([]byte(value), &objects); err == nil {
+					settings.EnabledChartObjects = objects
+				}
 			}
 		}
 	}
@@ -74,14 +87,20 @@ func (s *ChartStore) SaveSettings(settings Settings) error {
 	}
 	defer stmt.Close()
 
+	enabledObjects, err := json.Marshal(settings.EnabledChartObjects)
+	if err != nil {
+		return err
+	}
+
 	kv := map[string]string{
-		"DateFormat":      settings.DateFormat,
-		"TimeFormat":      settings.TimeFormat,
-		"DefaultLocation": settings.DefaultLocation,
-		"DefaultLat":      settings.DefaultLat,
-		"DefaultLng":      settings.DefaultLng,
-		"NodePreference":  settings.NodePreference,
-		"PoFPreference":   settings.PoFPreference,
+		"DateFormat":          settings.DateFormat,
+		"TimeFormat":          settings.TimeFormat,
+		"DefaultLocation":     settings.DefaultLocation,
+		"DefaultLat":          settings.DefaultLat,
+		"DefaultLng":          settings.DefaultLng,
+		"NodePreference":      settings.NodePreference,
+		"PoFPreference":       settings.PoFPreference,
+		"EnabledChartObjects": string(enabledObjects),
 	}
 
 	for k, v := range kv {

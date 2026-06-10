@@ -12,6 +12,7 @@ type BirthData struct {
 	UTCOffset        string
 	TimezoneName     string
 	ChartType        ChartType
+	EnabledObjects   []Planet
 }
 
 type PlanetPosition struct {

@@ -35,6 +35,14 @@ func Launch() {
 		return
 	}
 	defer store.Close()
+	activeSettings, _ := store.GetSettings()
+	resolver.SetEnabledObjects(activeSettings.EnabledChartObjects)
+	enabledChartObjects := func() []astro.Planet {
+		settings, _ := store.GetSettings()
+		activeSettings = settings
+		resolver.SetEnabledObjects(settings.EnabledChartObjects)
+		return settings.EnabledChartObjects
+	}
 	savedCharts, err := store.List()
 	if err != nil {
 		savedCharts = nil
@@ -60,6 +68,7 @@ func Launch() {
 					LatitudeDegrees:  resolved.Single.Latitude,
 					LongitudeDegrees: resolved.Single.Longitude,
 					HouseSystem:      resolved.Single.HouseSystem,
+					EnabledObjects:   activeSettings.EnabledChartObjects,
 				}
 			} else if resolved.Synastry != nil {
 				initial = astro.BirthData{
@@ -69,6 +78,7 @@ func Launch() {
 					LatitudeDegrees:  resolved.Synastry.InnerChart.Latitude,
 					LongitudeDegrees: resolved.Synastry.InnerChart.Longitude,
 					HouseSystem:      resolved.Synastry.InnerChart.HouseSystem,
+					EnabledObjects:   activeSettings.EnabledChartObjects,
 				}
 			}
 		}
@@ -114,8 +124,10 @@ func Launch() {
 			LatitudeDegrees:  defaultLat,
 			LongitudeDegrees: defaultLng,
 			HouseSystem:      astro.DefaultHouseSystem(),
+			EnabledObjects:   activeSettings.EnabledChartObjects,
 		}
 	}
+	initial.EnabledObjects = activeSettings.EnabledChartObjects
 
 	chart, err := calculator.NatalChart(initial)
 	if err != nil {
@@ -316,6 +328,7 @@ func Launch() {
 			status.SetText(parseErr.Error())
 			return false
 		}
+		data.EnabledObjects = enabledChartObjects()
 		nextChart, calcErr := calculator.NatalChart(data)
 		if calcErr != nil {
 			status.SetText(calcErr.Error())
@@ -377,6 +390,7 @@ func Launch() {
 		activeSavedChart.ReferenceDate = nextTime.Format("2006-01-02")
 		activeSavedChart.ReferenceTime = formatClock(nextTime)
 		activeSavedChart.ReferenceUTC = nextTime.Format(time.RFC3339)
+		enabledChartObjects()
 		resolvedChart, err := resolver.Resolve(activeSavedChart, savedCharts)
 		if err != nil {
 			status.SetText(err.Error())
@@ -810,7 +824,29 @@ func Launch() {
 	}
 
 	showGlobalSettings := func() {
-		showSettingsDialog(window, store)
+		showSettingsDialog(window, store, func() {
+			enabledChartObjects()
+			if hasActiveSavedChart {
+				resolvedChart, err := resolver.Resolve(activeSavedChart, savedCharts)
+				if err != nil {
+					status.SetText(err.Error())
+					return
+				}
+				if resolvedChart.Synastry != nil {
+					nextSynastry := *resolvedChart.Synastry
+					if synastrySwapped {
+						nextSynastry = swapSynastry(nextSynastry)
+					}
+					refreshSynastryChart(nextSynastry)
+					return
+				}
+				if resolvedChart.Single != nil {
+					refreshChart(*resolvedChart.Single)
+					return
+				}
+			}
+			calculateActiveChart()
+		})
 	}
 
 	window.SetMainMenu(fyne.NewMainMenu(
@@ -877,6 +913,7 @@ func Launch() {
 		hasActiveSavedChart = true
 		activeChartType = chartTypeFromSaved(selected)
 		synastrySwapped = false
+		enabledChartObjects()
 		resolvedChart, err := resolver.Resolve(selected, savedCharts)
 		if err == nil {
 			if resolvedChart.Synastry != nil {

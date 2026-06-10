@@ -16,7 +16,8 @@ type chartCalculator interface {
 }
 
 type ChartResolver struct {
-	calculator chartCalculator
+	calculator     chartCalculator
+	enabledObjects []astro.Planet
 }
 
 type ResolvedChart struct {
@@ -26,6 +27,10 @@ type ResolvedChart struct {
 
 func NewChartResolver(calculator chartCalculator) ChartResolver {
 	return ChartResolver{calculator: calculator}
+}
+
+func (r *ChartResolver) SetEnabledObjects(objects []astro.Planet) {
+	r.enabledObjects = append([]astro.Planet(nil), objects...)
 }
 
 func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedChart) (ResolvedChart, error) {
@@ -40,6 +45,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
+		data.EnabledObjects = r.enabledObjects
 		chart, err := r.calculator.NatalChart(data)
 		if err != nil {
 			return ResolvedChart{}, err
@@ -55,6 +61,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
+		natalData.EnabledObjects = r.enabledObjects
 		referenceTime, err := referenceTimeFromSaved(saved)
 		if err != nil {
 			return ResolvedChart{}, err
@@ -99,6 +106,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
+		natalData.EnabledObjects = r.enabledObjects
 		referenceTime, err := referenceTimeFromSaved(saved)
 		if err != nil {
 			return ResolvedChart{}, err
@@ -139,6 +147,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
+		natalData.EnabledObjects = r.enabledObjects
 		referenceTime, err := referenceTimeFromSaved(saved)
 		if err != nil {
 			return ResolvedChart{}, err
@@ -153,7 +162,13 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		progressedDuration := time.Duration(float64(duration) / 365.242199)
 		progressedTime := natalTime.Add(progressedDuration)
 
-		progressedData := natalData
+		arcData := natalData
+		arcData.EnabledObjects = withRequiredObjects(arcData.EnabledObjects, astro.Sun)
+		arcInnerChart, err := r.calculator.NatalChart(arcData)
+		if err != nil {
+			return ResolvedChart{}, err
+		}
+		progressedData := arcData
 		progressedData.DateTimeUTC = progressedTime
 		progressedChart, err := r.calculator.NatalChart(progressedData)
 		if err != nil {
@@ -161,7 +176,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		}
 
 		var natalSun, progressedSun float64
-		for _, p := range innerChart.Planets {
+		for _, p := range arcInnerChart.Planets {
 			if p.Planet == astro.Sun {
 				natalSun = p.Longitude
 			}
@@ -210,6 +225,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
+		natalData.EnabledObjects = r.enabledObjects
 		referenceTime, err := referenceTimeFromSaved(saved)
 		if err != nil {
 			return ResolvedChart{}, err
@@ -241,6 +257,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
+		natalData.EnabledObjects = r.enabledObjects
 		referenceTime, err := referenceTimeFromSaved(saved)
 		if err != nil {
 			return ResolvedChart{}, err
@@ -280,6 +297,8 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 		if err != nil {
 			return ResolvedChart{}, err
 		}
+		innerData.EnabledObjects = r.enabledObjects
+		outerData.EnabledObjects = r.enabledObjects
 		innerData.Name = innerSaved.Name
 		outerData.Name = outerSaved.Name
 		innerChart, err := r.calculator.NatalChart(innerData)
@@ -387,8 +406,22 @@ func findSavedChart(charts []storage.SavedChart, id string) (storage.SavedChart,
 	return storage.SavedChart{}, false
 }
 
+func withRequiredObjects(objects []astro.Planet, required ...astro.Planet) []astro.Planet {
+	next := append([]astro.Planet(nil), objects...)
+	seen := astro.EnabledChartObjectSet(next)
+	for _, object := range required {
+		if !seen[object] {
+			next = append(next, object)
+			seen[object] = true
+		}
+	}
+	return next
+}
+
 func (r ChartResolver) calculateSolarReturn(natalData astro.BirthData, referenceTime time.Time) (astro.Chart, error) {
-	natalChart, err := r.calculator.NatalChart(natalData)
+	referenceData := natalData
+	referenceData.EnabledObjects = withRequiredObjects(referenceData.EnabledObjects, astro.Sun)
+	natalChart, err := r.calculator.NatalChart(referenceData)
 	if err != nil {
 		return astro.Chart{}, err
 	}
@@ -407,6 +440,7 @@ func (r ChartResolver) calculateSolarReturn(natalData astro.BirthData, reference
 	currentTime := guessTime
 	for iter := 0; iter < 10; iter++ {
 		tempData := natalData
+		tempData.EnabledObjects = referenceData.EnabledObjects
 		tempData.DateTimeUTC = currentTime
 		tempChart, err := r.calculator.NatalChart(tempData)
 		if err != nil {
@@ -442,11 +476,14 @@ func (r ChartResolver) calculateSolarReturn(natalData astro.BirthData, reference
 		UTCOffset:        natalData.UTCOffset,
 		TimezoneName:     natalData.TimezoneName,
 		ChartType:        astro.ChartTypeSolarReturn,
+		EnabledObjects:   natalData.EnabledObjects,
 	})
 }
 
 func (r ChartResolver) calculateLunarReturn(natalData astro.BirthData, referenceTime time.Time) (astro.Chart, error) {
-	natalChart, err := r.calculator.NatalChart(natalData)
+	referenceData := natalData
+	referenceData.EnabledObjects = withRequiredObjects(referenceData.EnabledObjects, astro.Moon)
+	natalChart, err := r.calculator.NatalChart(referenceData)
 	if err != nil {
 		return astro.Chart{}, err
 	}
@@ -461,6 +498,7 @@ func (r ChartResolver) calculateLunarReturn(natalData astro.BirthData, reference
 	currentTime := referenceTime
 	for iter := 0; iter < 15; iter++ {
 		tempData := natalData
+		tempData.EnabledObjects = referenceData.EnabledObjects
 		tempData.DateTimeUTC = currentTime
 		tempChart, err := r.calculator.NatalChart(tempData)
 		if err != nil {
@@ -496,5 +534,6 @@ func (r ChartResolver) calculateLunarReturn(natalData astro.BirthData, reference
 		UTCOffset:        natalData.UTCOffset,
 		TimezoneName:     natalData.TimezoneName,
 		ChartType:        astro.ChartTypeLunarReturn,
+		EnabledObjects:   natalData.EnabledObjects,
 	})
 }

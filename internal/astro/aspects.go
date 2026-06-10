@@ -27,6 +27,7 @@ var traditionalAspectRules = []aspectRule{
 }
 
 func TraditionalAspects(positions []PlanetPosition) []Aspect {
+	positions = AspectablePositions(positions)
 	var aspects []Aspect
 	for i := 0; i < len(positions); i++ {
 		for j := i + 1; j < len(positions); j++ {
