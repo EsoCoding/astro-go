@@ -82,4 +82,3 @@ func shortenLocationName(location string) string {
 	}
 	return location
 }
-

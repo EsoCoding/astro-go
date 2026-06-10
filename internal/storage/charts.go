@@ -22,22 +22,28 @@ const (
 )
 
 type SavedChart struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	ChartType         string `json:"chart_type"`
-	HouseSystem       string `json:"house_system"`
-	BaseChartID       string `json:"base_chart_id"`
-	ComparisonChartID string `json:"comparison_chart_id"`
-	ReferenceDate     string `json:"reference_date"`
-	ReferenceTime     string `json:"reference_time"`
-	ReferenceUTC      string `json:"reference_datetime_utc"`
-	LocalDate         string `json:"local_date"`
-	LocalTime         string `json:"local_time"`
-	UTCOffset         string `json:"utc_offset"`
-	LocationName      string `json:"location_name"`
-	LatitudeDegrees   string `json:"latitude_degrees"`
-	LongitudeDegrees  string `json:"longitude_degrees"`
-	UpdatedAtUTC      string `json:"updated_at_utc"`
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	ChartType             string `json:"chart_type"`
+	HouseSystem           string `json:"house_system"`
+	BaseChartID           string `json:"base_chart_id"`
+	ComparisonChartID     string `json:"comparison_chart_id"`
+	ReferenceDate         string `json:"reference_date"`
+	ReferenceTime         string `json:"reference_time"`
+	ReferenceUTC          string `json:"reference_datetime_utc"`
+	LocalDate             string `json:"local_date"`
+	LocalTime             string `json:"local_time"`
+	UTCOffset             string `json:"utc_offset"`
+	LocationName          string `json:"location_name"`
+	LatitudeDegrees       string `json:"latitude_degrees"`
+	LongitudeDegrees      string `json:"longitude_degrees"`
+	UpdatedAtUTC          string `json:"updated_at_utc"`
+	RelocatedLatitude     string `json:"relocated_latitude"`
+	RelocatedLongitude    string `json:"relocated_longitude"`
+	RelocatedLocationName string `json:"relocated_location_name"`
+	ProgressionRate       string `json:"progression_rate"`
+	DirectionKey          string `json:"direction_key"`
+	DirectionPoleSystem   string `json:"direction_pole_system"`
 }
 
 func SavedChartFromBirthData(data astro.BirthData, localDate, localTime, utcOffset, locationName, latitude, longitude string) SavedChart {
@@ -119,7 +125,8 @@ func (s *ChartStore) Path() string {
 func (s *ChartStore) List() ([]SavedChart, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, chart_type, house_system, base_chart_id, comparison_chart_id, reference_date, reference_time, reference_datetime_utc,
-		       local_date, local_time, utc_offset, location_name, latitude_degrees, longitude_degrees, updated_at_utc
+		       local_date, local_time, utc_offset, location_name, latitude_degrees, longitude_degrees, updated_at_utc,
+		       relocated_latitude, relocated_longitude, relocated_location_name, progression_rate, direction_key, direction_pole_system
 		FROM saved_charts
 		ORDER BY updated_at_utc DESC, name ASC
 	`)
@@ -133,6 +140,12 @@ func (s *ChartStore) List() ([]SavedChart, error) {
 		var chart SavedChart
 		var baseChartID sql.NullString
 		var comparisonChartID sql.NullString
+		var relocatedLat sql.NullString
+		var relocatedLng sql.NullString
+		var relocatedLoc sql.NullString
+		var progressionRate sql.NullString
+		var directionKey sql.NullString
+		var directionPole sql.NullString
 		if err := rows.Scan(
 			&chart.ID,
 			&chart.Name,
@@ -150,11 +163,23 @@ func (s *ChartStore) List() ([]SavedChart, error) {
 			&chart.LatitudeDegrees,
 			&chart.LongitudeDegrees,
 			&chart.UpdatedAtUTC,
+			&relocatedLat,
+			&relocatedLng,
+			&relocatedLoc,
+			&progressionRate,
+			&directionKey,
+			&directionPole,
 		); err != nil {
 			return nil, err
 		}
 		chart.BaseChartID = baseChartID.String
 		chart.ComparisonChartID = comparisonChartID.String
+		chart.RelocatedLatitude = relocatedLat.String
+		chart.RelocatedLongitude = relocatedLng.String
+		chart.RelocatedLocationName = relocatedLoc.String
+		chart.ProgressionRate = progressionRate.String
+		chart.DirectionKey = directionKey.String
+		chart.DirectionPoleSystem = directionPole.String
 		charts = append(charts, chart)
 	}
 	return charts, rows.Err()
@@ -232,7 +257,13 @@ func (s *ChartStore) initSchema() error {
 			location_name TEXT NOT NULL DEFAULT '',
 			source_system TEXT NOT NULL DEFAULT 'astro-go',
 			created_at_utc TEXT NOT NULL DEFAULT '',
-			updated_at_utc TEXT NOT NULL
+			updated_at_utc TEXT NOT NULL,
+			relocated_latitude TEXT NOT NULL DEFAULT '',
+			relocated_longitude TEXT NOT NULL DEFAULT '',
+			relocated_location_name TEXT NOT NULL DEFAULT '',
+			progression_rate TEXT NOT NULL DEFAULT '',
+			direction_key TEXT NOT NULL DEFAULT '',
+			direction_pole_system TEXT NOT NULL DEFAULT ''
 		);
 
 		CREATE TABLE IF NOT EXISTS chart_versions (
@@ -300,6 +331,12 @@ func (s *ChartStore) initSchema() error {
 		{"location_name", "TEXT NOT NULL DEFAULT ''"},
 		{"source_system", "TEXT NOT NULL DEFAULT 'astro-go'"},
 		{"created_at_utc", "TEXT NOT NULL DEFAULT ''"},
+		{"relocated_latitude", "TEXT NOT NULL DEFAULT ''"},
+		{"relocated_longitude", "TEXT NOT NULL DEFAULT ''"},
+		{"relocated_location_name", "TEXT NOT NULL DEFAULT ''"},
+		{"progression_rate", "TEXT NOT NULL DEFAULT ''"},
+		{"direction_key", "TEXT NOT NULL DEFAULT ''"},
+		{"direction_pole_system", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.addSavedChartColumnIfMissing(column.name, column.definition); err != nil {
 			return err
@@ -367,8 +404,9 @@ func (s *ChartStore) save(chart *SavedChart, touchUpdatedAt bool) error {
 	_, err := s.db.Exec(`
 		INSERT INTO saved_charts (
 			id, name, chart_type, house_system, base_chart_id, comparison_chart_id, reference_date, reference_time, reference_datetime_utc,
-			local_date, local_time, utc_offset, location_name, latitude_degrees, longitude_degrees, updated_at_utc
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			local_date, local_time, utc_offset, location_name, latitude_degrees, longitude_degrees, updated_at_utc,
+			relocated_latitude, relocated_longitude, relocated_location_name, progression_rate, direction_key, direction_pole_system
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			chart_type = excluded.chart_type,
@@ -384,8 +422,14 @@ func (s *ChartStore) save(chart *SavedChart, touchUpdatedAt bool) error {
 			location_name = excluded.location_name,
 			latitude_degrees = excluded.latitude_degrees,
 			longitude_degrees = excluded.longitude_degrees,
-			updated_at_utc = excluded.updated_at_utc
-	`, chart.ID, chart.Name, chart.ChartType, chart.HouseSystem, nullableString(chart.BaseChartID), nullableString(chart.ComparisonChartID), chart.ReferenceDate, chart.ReferenceTime, chart.ReferenceUTC, chart.LocalDate, chart.LocalTime, chart.UTCOffset, chart.LocationName, chart.LatitudeDegrees, chart.LongitudeDegrees, chart.UpdatedAtUTC)
+			updated_at_utc = excluded.updated_at_utc,
+			relocated_latitude = excluded.relocated_latitude,
+			relocated_longitude = excluded.relocated_longitude,
+			relocated_location_name = excluded.relocated_location_name,
+			progression_rate = excluded.progression_rate,
+			direction_key = excluded.direction_key,
+			direction_pole_system = excluded.direction_pole_system
+	`, chart.ID, chart.Name, chart.ChartType, chart.HouseSystem, nullableString(chart.BaseChartID), nullableString(chart.ComparisonChartID), chart.ReferenceDate, chart.ReferenceTime, chart.ReferenceUTC, chart.LocalDate, chart.LocalTime, chart.UTCOffset, chart.LocationName, chart.LatitudeDegrees, chart.LongitudeDegrees, chart.UpdatedAtUTC, chart.RelocatedLatitude, chart.RelocatedLongitude, chart.RelocatedLocationName, chart.ProgressionRate, chart.DirectionKey, chart.DirectionPoleSystem)
 	return err
 }
 

@@ -360,21 +360,47 @@ func inCanvasSynastryInfo(chart astro.SynastryChart, palette chartPalette, size 
 	headerSize := float32(12)
 	bodySize := float32(10)
 
+	// Inner Chart name starts at the top-left
+	innerName := chart.InnerChart.Name
+	skipInnerDate := false
+	if innerName == "" {
+		localTime, _, _ := chartDisplayTime(chart.InnerChart)
+		innerName = localTime.Format("2 Jan 2006, Mon")
+		skipInnerDate = true
+	}
 	objects := []fyne.CanvasObject{
-		textAt(chart.Name, palette.text, headerSize+2, x, y, true, assets.CourierFont),
+		textAt(innerName, palette.text, headerSize+2, x, y, true, assets.CourierFont),
 	}
 	y += 18
+
+	// Inner Chart subtitle
 	objects = append(objects, textAt("Inner Chart", palette.text, bodySize, x, y, true, assets.CourierFont))
 	y += 16
-	objects = append(objects, textAt(chart.InnerChart.Name, palette.text, bodySize, x, y, true, assets.CourierFont))
-	y += 16
-	objects, y = appendChartInfoDetails(objects, chart.InnerChart, palette, x, y, bodySize)
-	y += 12
-	objects = append(objects, textAt("Outer Chart", palette.mutedText, bodySize, x, y, true, assets.CourierFont))
-	y += 16
-	objects = append(objects, textAt(chart.OuterChart.Name, palette.text, bodySize, x, y, true, assets.CourierFont))
-	y += 16
-	objects, _ = appendChartInfoDetails(objects, chart.OuterChart, palette, x, y, bodySize)
+
+	// Inner Chart details
+	objects, _ = appendChartInfoDetails(objects, chart.InnerChart, palette, x, y, bodySize, false, skipInnerDate)
+
+	// Outer Chart info starts at the top-right
+	rightX := float64(size.Width) - 12.0
+	yOuter := 18.0 // Align with innerName on the left!
+
+	// Outer Chart name
+	outerName := chart.OuterChart.Name
+	skipOuterDate := false
+	if outerName == "" {
+		localTime, _, _ := chartDisplayTime(chart.OuterChart)
+		outerName = localTime.Format("2 Jan 2006, Mon")
+		skipOuterDate = true
+	}
+	objects = append(objects, textAtRight(outerName, palette.text, headerSize+2, rightX, yOuter, true, assets.CourierFont))
+	yOuter += 18
+
+	// Outer Chart subtitle
+	objects = append(objects, textAtRight("Outer Chart", palette.text, bodySize, rightX, yOuter, true, assets.CourierFont))
+	yOuter += 16
+
+	// Outer Chart details
+	objects, _ = appendChartInfoDetails(objects, chart.OuterChart, palette, rightX, yOuter, bodySize, true, skipOuterDate)
 
 	return objects
 }

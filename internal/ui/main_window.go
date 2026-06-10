@@ -184,6 +184,8 @@ func Launch() {
 	var backButton *widget.Button
 	var forwardButton *widget.Button
 	var swapButton *widget.Button
+	var editButton *widget.Button
+	var loadSavedChart func(storage.SavedChart)
 
 	updateWorkspaceChrome := func() {
 		if workspaceLabel != nil {
@@ -213,6 +215,13 @@ func Launch() {
 				swapButton.Enable()
 			} else {
 				swapButton.Hide()
+			}
+		}
+		if editButton != nil {
+			if hasActiveSavedChart && activeChartType != astro.ChartTypeSynastry {
+				editButton.Enable()
+			} else {
+				editButton.Disable()
 			}
 		}
 	}
@@ -274,12 +283,12 @@ func Launch() {
 				chartList.Select(selectedIndex)
 			}
 		}
+		if selected, ok := savedChartByID(savedCharts, selectedSavedID); ok {
+			loadSavedChart(selected)
+		}
 		status.SetText(fmt.Sprintf("Saved chart %s", saved.Name))
 	}
 
-	saveCurrentChart := func() {
-		saveChart(true)
-	}
 	saveCurrentChartAsNew := func() {
 		saveChart(false)
 	}
@@ -322,6 +331,43 @@ func Launch() {
 		status.SetText(fmt.Sprintf("Loaded %s %s x %s", activeChartType.String(), synastry.InnerChart.Name, synastry.OuterChart.Name))
 	}
 
+	loadSavedChart = func(selected storage.SavedChart) {
+		selectedSavedID = selected.ID
+		activeSavedChart = selected
+		hasActiveSavedChart = true
+		activeChartType = chartTypeFromSaved(selected)
+		synastrySwapped = false
+		enabledChartObjects()
+		resolvedChart, err := resolver.Resolve(selected, savedCharts)
+		if err == nil {
+			if resolvedChart.Synastry != nil {
+				refreshSynastryChart(*resolvedChart.Synastry)
+				return
+			}
+			if resolvedChart.Single != nil && canCalculateSavedChart(selected) {
+				setFormFromSavedChart(selected)
+			}
+			if resolvedChart.Single != nil {
+				refreshChart(*resolvedChart.Single)
+				status.SetText(fmt.Sprintf("Loaded %s", selected.Name))
+				return
+			}
+			if canCalculateSavedChart(selected) {
+				setFormFromSavedChart(selected)
+				status.SetText("No chart data resolved")
+				return
+			}
+		}
+		if canCalculateSavedChart(selected) {
+			setFormFromSavedChart(selected)
+			status.SetText(err.Error())
+			updateWorkspaceChrome()
+			return
+		}
+		status.SetText(err.Error())
+		updateWorkspaceChrome()
+	}
+
 	calculateActiveChart := func() bool {
 		data, parseErr := parseBirthData(name.Text, date.Text, clock.Text, timezone.Text, locationName.Text, latitude.Text, longitude.Text, houseSystem.Selected)
 		if parseErr != nil {
@@ -340,10 +386,6 @@ func Launch() {
 		synastrySwapped = false
 		refreshChart(nextChart)
 		return true
-	}
-
-	calculate := func() {
-		calculateActiveChart()
 	}
 
 	navigateTime := func(direction int) {
@@ -368,6 +410,7 @@ func Launch() {
 			date.SetText(nextTime.Format("2006-01-02"))
 			clock.SetText(formatClock(nextTime))
 			if calculateActiveChart() {
+				saveChart(selectedSavedID != "")
 				status.SetText(fmt.Sprintf("Moved natal chart to %s %s", date.Text, clock.Text))
 			}
 			return
@@ -390,6 +433,11 @@ func Launch() {
 		activeSavedChart.ReferenceDate = nextTime.Format("2006-01-02")
 		activeSavedChart.ReferenceTime = formatClock(nextTime)
 		activeSavedChart.ReferenceUTC = nextTime.Format(time.RFC3339)
+		if saveErr := store.Save(&activeSavedChart); saveErr != nil {
+			status.SetText(saveErr.Error())
+			return
+		}
+		refreshSavedCharts()
 		enabledChartObjects()
 		resolvedChart, err := resolver.Resolve(activeSavedChart, savedCharts)
 		if err != nil {
@@ -542,119 +590,829 @@ func Launch() {
 		dataWindow.Show()
 	}
 
-	showNewDerivedChartDialog := func() {
-		dataWindow := application.NewWindow("New Derived Chart")
-		dataWindow.Resize(fyne.NewSize(460, 420))
+	var showBirthDataDialog func()
 
-		nextType := widget.NewSelect(derivedChartTypeOptions(), nil)
-		nextType.SetSelected(astro.ChartTypeTransit.String())
-		nextName := widget.NewEntry()
-		nextBase := widget.NewSelect(nil, nil)
-		nextComparison := widget.NewSelect(nil, nil)
-		nextReferenceDate := widget.NewEntry()
-		nextReferenceTime := widget.NewEntry()
-
-		nextReferenceDate.SetText(time.Now().Format("2006-01-02"))
-		nextReferenceTime.SetText("12:00")
-
-		derivedLookup := map[string]storage.SavedChart{}
-		refreshDerivedSelectors := func() {
-			options := []string{}
-			derivedLookup = map[string]storage.SavedChart{}
-			for _, saved := range savedCharts {
-				if saved.ChartType != "" && saved.ChartType != string(astro.ChartTypeNatal) {
-					continue
-				}
-				label := savedChartLabel(saved)
-				options = append(options, label)
-				derivedLookup[label] = saved
+	getNatalCharts := func() ([]string, map[string]storage.SavedChart) {
+		options := []string{}
+		lookup := map[string]storage.SavedChart{}
+		for _, saved := range savedCharts {
+			if saved.ChartType != "" && saved.ChartType != string(astro.ChartTypeNatal) {
+				continue
 			}
-			nextBase.Options = options
-			nextComparison.Options = options
-			nextBase.Refresh()
-			nextComparison.Refresh()
-			if len(options) > 0 {
-				if nextBase.Selected == "" {
-					nextBase.SetSelected(options[0])
+			label := savedChartLabel(saved)
+			options = append(options, label)
+			lookup[label] = saved
+		}
+		return options, lookup
+	}
+
+	createNatalSelector := func(options []string, lookup map[string]storage.SavedChart) *widget.Select {
+		sel := widget.NewSelect(options, nil)
+		if len(options) > 0 {
+			if hasActiveSavedChart && activeSavedChart.ChartType == string(astro.ChartTypeNatal) {
+				activeLabel := savedChartLabel(activeSavedChart)
+				for _, opt := range options {
+					if opt == activeLabel {
+						sel.SetSelected(opt)
+						break
+					}
 				}
-				if nextComparison.Selected == "" {
-					nextComparison.SetSelected(options[0])
-				}
+			}
+			if sel.Selected == "" {
+				sel.SetSelected(options[0])
+			}
+		}
+		return sel
+	}
+
+	showSolarReturnDialog := func(editChart *storage.SavedChart) {
+		isEdit := editChart != nil
+		titleText := "Cast Solar Return Chart"
+		actionText := "Cast"
+		if isEdit {
+			titleText = "Edit Solar Return Chart"
+			actionText = "Save"
+		}
+
+		dataWindow := application.NewWindow(titleText)
+		dataWindow.Resize(fyne.NewSize(450, 420))
+
+		options, lookup := getNatalCharts()
+		if len(options) == 0 {
+			dialog.ShowInformation("No Natal Charts", "Please create a natal chart first.", window)
+			return
+		}
+
+		baseSelect := createNatalSelector(options, lookup)
+
+		yearEntry := widget.NewEntry()
+		yearEntry.SetText(fmt.Sprintf("%d", time.Now().Year()))
+
+		nameEntry := widget.NewEntry()
+		updateName := func() {
+			if !isEdit {
+				nameEntry.SetText(fmt.Sprintf("Solar Return %s %s", lookup[baseSelect.Selected].Name, yearEntry.Text))
+			}
+		}
+		baseSelect.OnChanged = func(value string) { updateName() }
+		yearEntry.OnChanged = func(value string) { updateName() }
+
+		relocateCheck := widget.NewCheck("Relocate return chart", nil)
+		relocateLocation := widget.NewEntry()
+		relocateLocation.SetPlaceHolder("Location name")
+		relocateLat := widget.NewEntry()
+		relocateLat.SetPlaceHolder("Latitude")
+		relocateLon := widget.NewEntry()
+		relocateLon.SetPlaceHolder("Longitude")
+
+		statusLabel := widget.NewLabel("")
+
+		relocateSearch := widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
+			result, err := geocoder.Lookup(relocateLocation.Text)
+			if err != nil {
+				statusLabel.SetText("Geocoding failed: " + err.Error())
+				return
+			}
+			relocateLocation.SetText(result.DisplayName)
+			relocateLat.SetText(fmt.Sprintf("%.6f", result.Latitude))
+			relocateLon.SetText(fmt.Sprintf("%.6f", result.Longitude))
+		})
+
+		relocateFields := container.NewVBox(
+			widget.NewLabelWithStyle("Relocation Coordinates", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.NewBorder(nil, nil, nil, relocateSearch, relocateLocation),
+			container.NewGridWithColumns(2, relocateLat, relocateLon),
+		)
+		relocateFields.Hide()
+
+		relocateCheck.OnChanged = func(checked bool) {
+			if checked {
+				relocateFields.Show()
+			} else {
+				relocateFields.Hide()
 			}
 		}
 
-		derivedForm := widget.NewForm(
-			widget.NewFormItem("Name", nextName),
-			widget.NewFormItem("Base chart", nextBase),
-			widget.NewFormItem("Comparison chart", nextComparison),
-			widget.NewFormItem("Reference date", nextReferenceDate),
-			widget.NewFormItem("Reference time", nextReferenceTime),
+		if isEdit {
+			nameEntry.SetText(editChart.Name)
+			if baseChart, ok := savedChartByID(savedCharts, editChart.BaseChartID); ok {
+				baseSelect.SetSelected(savedChartLabel(baseChart))
+			}
+			if editChart.ReferenceDate != "" {
+				if parsed, err := time.Parse("2006-01-02", editChart.ReferenceDate); err == nil {
+					yearEntry.SetText(fmt.Sprintf("%d", parsed.Year()))
+				}
+			}
+			if editChart.RelocatedLatitude != "" && editChart.RelocatedLongitude != "" {
+				relocateCheck.SetChecked(true)
+				relocateLocation.SetText(editChart.RelocatedLocationName)
+				relocateLat.SetText(editChart.RelocatedLatitude)
+				relocateLon.SetText(editChart.RelocatedLongitude)
+				relocateFields.Show()
+			}
+		} else {
+			updateName()
+		}
+
+		cast := func() {
+			base := lookup[baseSelect.Selected]
+			natalTime, err := parseLocalDateTime(base.LocalDate, base.LocalTime)
+			if err != nil {
+				statusLabel.SetText("Error parsing natal birth time: " + err.Error())
+				return
+			}
+
+			year, err := strconv.Atoi(yearEntry.Text)
+			if err != nil || year < 1000 || year > 9999 {
+				statusLabel.SetText("Invalid return year")
+				return
+			}
+
+			var saved storage.SavedChart
+			if isEdit {
+				saved = *editChart
+			} else {
+				saved = base
+				saved.ID = ""
+			}
+			saved.Name = nameEntry.Text
+			saved.ChartType = string(astro.ChartTypeSolarReturn)
+			saved.BaseChartID = base.ID
+			saved.ComparisonChartID = ""
+			saved.ReferenceDate = fmt.Sprintf("%04d-%02d-%02d", year, int(natalTime.Month()), natalTime.Day())
+			saved.ReferenceTime = formatClock(natalTime)
+			saved.ReferenceUTC = time.Date(year, natalTime.Month(), natalTime.Day(), natalTime.Hour(), natalTime.Minute(), natalTime.Second(), 0, time.UTC).Format(time.RFC3339)
+			saved.DirectionKey = ""
+
+			saved.RelocatedLatitude = ""
+			saved.RelocatedLongitude = ""
+			saved.RelocatedLocationName = ""
+			if relocateCheck.Checked {
+				saved.RelocatedLatitude = relocateLat.Text
+				saved.RelocatedLongitude = relocateLon.Text
+				saved.RelocatedLocationName = relocateLocation.Text
+			}
+
+			if saveErr := store.Save(&saved); saveErr != nil {
+				statusLabel.SetText(saveErr.Error())
+				return
+			}
+			dataWindow.Close()
+			selectedSavedID = saved.ID
+			refreshSavedCharts()
+			if chartList != nil {
+				if selectedIndex := savedChartIndexByID(savedCharts, selectedSavedID); selectedIndex >= 0 {
+					chartList.Select(selectedIndex)
+				}
+			}
+			loadSavedChart(saved)
+			status.SetText(fmt.Sprintf("Saved solar return chart %s", saved.Name))
+		}
+
+		form := widget.NewForm(
+			widget.NewFormItem("Base Natal Chart", baseSelect),
+			widget.NewFormItem("Chart Name", nameEntry),
+			widget.NewFormItem("Return Year", yearEntry),
 		)
 
-		updateMode := func(chartType astro.ChartType) {
-			nextName.SetText(defaultChartName(chartType))
-			refreshDerivedSelectors()
-			if chartType.RequiresComparisonChart() {
-				derivedForm.Items[2].Widget.Show()
-				derivedForm.Items[2].Text = "Comparison chart"
-			} else {
-				derivedForm.Items[2].Widget.Hide()
-			}
-			if chartType.RequiresReferenceTime() {
-				derivedForm.Items[3].Widget.Show()
-				derivedForm.Items[4].Widget.Show()
-			} else {
-				derivedForm.Items[3].Widget.Hide()
-				derivedForm.Items[4].Widget.Hide()
-			}
-			derivedForm.Refresh()
+		buttons := container.NewGridWithColumns(2,
+			widget.NewButton("Cancel", dataWindow.Close),
+			widget.NewButton(actionText, cast),
+		)
+
+		content := container.NewVBox(form, relocateCheck, relocateFields, statusLabel, buttons)
+		dataWindow.SetContent(widget.NewCard(titleText, "Configure solar return parameters.", content))
+		dataWindow.Show()
+	}
+
+	showLunarReturnDialog := func(editChart *storage.SavedChart) {
+		isEdit := editChart != nil
+		titleText := "Cast Lunar Return Chart"
+		actionText := "Cast"
+		if isEdit {
+			titleText = "Edit Lunar Return Chart"
+			actionText = "Save"
 		}
-		nextType.OnChanged = func(value string) {
-			updateMode(chartTypeFromLabel(value))
+
+		dataWindow := application.NewWindow(titleText)
+		dataWindow.Resize(fyne.NewSize(450, 450))
+
+		options, lookup := getNatalCharts()
+		if len(options) == 0 {
+			dialog.ShowInformation("No Natal Charts", "Please create a natal chart first.", window)
+			return
 		}
-		updateMode(astro.ChartTypeTransit)
+
+		baseSelect := createNatalSelector(options, lookup)
+
+		yearEntry := widget.NewEntry()
+		yearEntry.SetText(fmt.Sprintf("%d", time.Now().Year()))
+
+		months := []string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
+		monthSelect := widget.NewSelect(months, nil)
+		monthSelect.SetSelected(time.Now().Month().String())
+
+		nameEntry := widget.NewEntry()
+		updateName := func() {
+			if !isEdit {
+				nameEntry.SetText(fmt.Sprintf("Lunar Return %s %s %s", lookup[baseSelect.Selected].Name, yearEntry.Text, monthSelect.Selected))
+			}
+		}
+		baseSelect.OnChanged = func(value string) { updateName() }
+		yearEntry.OnChanged = func(value string) { updateName() }
+		monthSelect.OnChanged = func(value string) { updateName() }
+
+		relocateCheck := widget.NewCheck("Relocate return chart", nil)
+		relocateLocation := widget.NewEntry()
+		relocateLocation.SetPlaceHolder("Location name")
+		relocateLat := widget.NewEntry()
+		relocateLat.SetPlaceHolder("Latitude")
+		relocateLon := widget.NewEntry()
+		relocateLon.SetPlaceHolder("Longitude")
+
+		statusLabel := widget.NewLabel("")
+
+		relocateSearch := widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
+			result, err := geocoder.Lookup(relocateLocation.Text)
+			if err != nil {
+				statusLabel.SetText("Geocoding failed: " + err.Error())
+				return
+			}
+			relocateLocation.SetText(result.DisplayName)
+			relocateLat.SetText(fmt.Sprintf("%.6f", result.Latitude))
+			relocateLon.SetText(fmt.Sprintf("%.6f", result.Longitude))
+		})
+
+		relocateFields := container.NewVBox(
+			widget.NewLabelWithStyle("Relocation Coordinates", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.NewBorder(nil, nil, nil, relocateSearch, relocateLocation),
+			container.NewGridWithColumns(2, relocateLat, relocateLon),
+		)
+		relocateFields.Hide()
+
+		relocateCheck.OnChanged = func(checked bool) {
+			if checked {
+				relocateFields.Show()
+			} else {
+				relocateFields.Hide()
+			}
+		}
+
+		if isEdit {
+			nameEntry.SetText(editChart.Name)
+			if baseChart, ok := savedChartByID(savedCharts, editChart.BaseChartID); ok {
+				baseSelect.SetSelected(savedChartLabel(baseChart))
+			}
+			if editChart.ReferenceDate != "" {
+				if parsed, err := time.Parse("2006-01-02", editChart.ReferenceDate); err == nil {
+					yearEntry.SetText(fmt.Sprintf("%d", parsed.Year()))
+					monthSelect.SetSelected(parsed.Month().String())
+				}
+			}
+			if editChart.RelocatedLatitude != "" && editChart.RelocatedLongitude != "" {
+				relocateCheck.SetChecked(true)
+				relocateLocation.SetText(editChart.RelocatedLocationName)
+				relocateLat.SetText(editChart.RelocatedLatitude)
+				relocateLon.SetText(editChart.RelocatedLongitude)
+				relocateFields.Show()
+			}
+		} else {
+			updateName()
+		}
+
+		cast := func() {
+			base := lookup[baseSelect.Selected]
+			natalTime, err := parseLocalDateTime(base.LocalDate, base.LocalTime)
+			if err != nil {
+				statusLabel.SetText("Error parsing natal birth time: " + err.Error())
+				return
+			}
+
+			year, err := strconv.Atoi(yearEntry.Text)
+			if err != nil || year < 1000 || year > 9999 {
+				statusLabel.SetText("Invalid return year")
+				return
+			}
+
+			monthIndex := 1
+			for i, m := range months {
+				if m == monthSelect.Selected {
+					monthIndex = i + 1
+					break
+				}
+			}
+
+			var saved storage.SavedChart
+			if isEdit {
+				saved = *editChart
+			} else {
+				saved = base
+				saved.ID = ""
+			}
+			saved.Name = nameEntry.Text
+			saved.ChartType = string(astro.ChartTypeLunarReturn)
+			saved.BaseChartID = base.ID
+			saved.ComparisonChartID = ""
+			saved.ReferenceDate = fmt.Sprintf("%04d-%02d-%02d", year, monthIndex, natalTime.Day())
+			saved.ReferenceTime = formatClock(natalTime)
+			saved.ReferenceUTC = time.Date(year, time.Month(monthIndex), natalTime.Day(), natalTime.Hour(), natalTime.Minute(), natalTime.Second(), 0, time.UTC).Format(time.RFC3339)
+			saved.DirectionKey = ""
+
+			saved.RelocatedLatitude = ""
+			saved.RelocatedLongitude = ""
+			saved.RelocatedLocationName = ""
+			if relocateCheck.Checked {
+				saved.RelocatedLatitude = relocateLat.Text
+				saved.RelocatedLongitude = relocateLon.Text
+				saved.RelocatedLocationName = relocateLocation.Text
+			}
+
+			if saveErr := store.Save(&saved); saveErr != nil {
+				statusLabel.SetText(saveErr.Error())
+				return
+			}
+			dataWindow.Close()
+			selectedSavedID = saved.ID
+			refreshSavedCharts()
+			if chartList != nil {
+				if selectedIndex := savedChartIndexByID(savedCharts, selectedSavedID); selectedIndex >= 0 {
+					chartList.Select(selectedIndex)
+				}
+			}
+			loadSavedChart(saved)
+			status.SetText(fmt.Sprintf("Saved lunar return chart %s", saved.Name))
+		}
+
+		form := widget.NewForm(
+			widget.NewFormItem("Base Natal Chart", baseSelect),
+			widget.NewFormItem("Chart Name", nameEntry),
+			widget.NewFormItem("Return Year", yearEntry),
+			widget.NewFormItem("Return Month", monthSelect),
+		)
+
+		buttons := container.NewGridWithColumns(2,
+			widget.NewButton("Cancel", dataWindow.Close),
+			widget.NewButton(actionText, cast),
+		)
+
+		content := container.NewVBox(form, relocateCheck, relocateFields, statusLabel, buttons)
+		dataWindow.SetContent(widget.NewCard(titleText, "Configure lunar return parameters.", content))
+		dataWindow.Show()
+	}
+
+	showProgressionDialog := func(progType astro.ChartType, editChart *storage.SavedChart) {
+		isEdit := editChart != nil
+		actionText := "Cast"
+		if isEdit {
+			actionText = "Save"
+		}
+
+		titleText := ""
+		switch progType {
+		case astro.ChartTypeSecondaryProgression:
+			titleText = "Secondary Progression"
+		case astro.ChartTypeTertiaryProgression:
+			titleText = "Tertiary Progression"
+		case astro.ChartTypeSolarArc:
+			titleText = "Solar Arc Chart"
+		case astro.ChartTypePrimaryDirection:
+			titleText = "Primary Directions Chart"
+		}
+
+		if isEdit {
+			titleText = "Edit " + titleText
+		} else {
+			titleText = "Cast " + titleText
+		}
+
+		dataWindow := application.NewWindow(titleText)
+		dataWindow.Resize(fyne.NewSize(450, 380))
+
+		options, lookup := getNatalCharts()
+		if len(options) == 0 {
+			dialog.ShowInformation("No Natal Charts", "Please create a natal chart first.", window)
+			return
+		}
+
+		baseSelect := createNatalSelector(options, lookup)
+
+		nameEntry := widget.NewEntry()
+		updateName := func() {
+			if !isEdit {
+				prefix := ""
+				switch progType {
+				case astro.ChartTypeSecondaryProgression:
+					prefix = "Sec. Prog"
+				case astro.ChartTypeTertiaryProgression:
+					prefix = "Tert. Prog"
+				case astro.ChartTypeSolarArc:
+					prefix = "Solar Arc"
+				case astro.ChartTypePrimaryDirection:
+					prefix = "Prim. Dir"
+				}
+				nameEntry.SetText(fmt.Sprintf("%s - %s", prefix, lookup[baseSelect.Selected].Name))
+			}
+		}
+		baseSelect.OnChanged = func(value string) { updateName() }
+
+		targetMode := widget.NewSelect([]string{"Date", "Age"}, nil)
+		targetMode.SetSelected("Date")
+
+		dateEntry := widget.NewEntry()
+		dateEntry.SetText(time.Now().Format("2006-01-02"))
+		timeEntry := widget.NewEntry()
+		timeEntry.SetText("12:00")
+
+		ageEntry := widget.NewEntry()
+		ageEntry.SetText("30")
+
+		primaryKeySelect := widget.NewSelect([]string{"Naibod (59'08\"/yr)", "Ptolemy (1°/yr)"}, nil)
+		primaryKeySelect.SetSelected("Naibod (59'08\"/yr)")
+
+		statusLabel := widget.NewLabel("")
+
+		dateFormItem1 := widget.NewFormItem("Target Date (YYYY-MM-DD)", dateEntry)
+		dateFormItem2 := widget.NewFormItem("Target Time (HH:MM)", timeEntry)
+		ageFormItem := widget.NewFormItem("Age (years)", ageEntry)
+		keyFormItem := widget.NewFormItem("Direction Key", primaryKeySelect)
+
+		form := widget.NewForm(
+			widget.NewFormItem("Base Natal Chart", baseSelect),
+			widget.NewFormItem("Chart Name", nameEntry),
+			widget.NewFormItem("Target Mode", targetMode),
+			dateFormItem1,
+			dateFormItem2,
+			ageFormItem,
+		)
+
+		if progType == astro.ChartTypePrimaryDirection {
+			form.AppendItem(keyFormItem)
+		}
+
+		refreshFields := func() {
+			if targetMode.Selected == "Age" {
+				dateFormItem1.Widget.Hide()
+				dateFormItem2.Widget.Hide()
+				ageFormItem.Widget.Show()
+			} else {
+				dateFormItem1.Widget.Show()
+				dateFormItem2.Widget.Show()
+				ageFormItem.Widget.Hide()
+			}
+			form.Refresh()
+		}
+		targetMode.OnChanged = func(value string) {
+			refreshFields()
+		}
+
+		if isEdit {
+			nameEntry.SetText(editChart.Name)
+			if baseChart, ok := savedChartByID(savedCharts, editChart.BaseChartID); ok {
+				baseSelect.SetSelected(savedChartLabel(baseChart))
+			}
+			if editChart.ReferenceDate != "" {
+				dateEntry.SetText(editChart.ReferenceDate)
+				timeEntry.SetText(editChart.ReferenceTime)
+			}
+			if editChart.DirectionKey != "" {
+				if editChart.DirectionKey == "ptolemy" {
+					primaryKeySelect.SetSelected("Ptolemy (1°/yr)")
+				} else {
+					primaryKeySelect.SetSelected("Naibod (59'08\"/yr)")
+				}
+			}
+		} else {
+			updateName()
+		}
+
+		refreshFields()
+
+		cast := func() {
+			base := lookup[baseSelect.Selected]
+			natalTime, err := parseLocalDateTime(base.LocalDate, base.LocalTime)
+			if err != nil {
+				statusLabel.SetText("Error parsing natal birth time: " + err.Error())
+				return
+			}
+
+			var saved storage.SavedChart
+			if isEdit {
+				saved = *editChart
+			} else {
+				saved = base
+				saved.ID = ""
+			}
+			saved.Name = nameEntry.Text
+			saved.ChartType = string(progType)
+			saved.BaseChartID = base.ID
+			saved.ComparisonChartID = ""
+			saved.RelocatedLatitude = ""
+			saved.RelocatedLongitude = ""
+			saved.RelocatedLocationName = ""
+			saved.DirectionKey = ""
+
+			if progType == astro.ChartTypePrimaryDirection {
+				if primaryKeySelect.Selected == "Ptolemy (1°/yr)" {
+					saved.DirectionKey = "ptolemy"
+				} else {
+					saved.DirectionKey = "naibod"
+				}
+			}
+
+			if targetMode.Selected == "Age" {
+				age, err := strconv.ParseFloat(ageEntry.Text, 64)
+				if err != nil || age < 0 {
+					statusLabel.SetText("Age must be a positive number")
+					return
+				}
+				targetTime := natalTime.Add(time.Duration(age * 365.242199 * 24 * float64(time.Hour)))
+				saved.ReferenceDate = targetTime.Format("2006-01-02")
+				saved.ReferenceTime = formatClock(targetTime)
+				saved.ReferenceUTC = targetTime.Format(time.RFC3339)
+			} else {
+				referenceUTC, err := parseReferenceDateTime(dateEntry.Text, timeEntry.Text)
+				if err != nil {
+					statusLabel.SetText(err.Error())
+					return
+				}
+				saved.ReferenceDate = dateEntry.Text
+				saved.ReferenceTime = timeEntry.Text
+				saved.ReferenceUTC = referenceUTC.Format(time.RFC3339)
+			}
+
+			if saveErr := store.Save(&saved); saveErr != nil {
+				statusLabel.SetText(saveErr.Error())
+				return
+			}
+			dataWindow.Close()
+			selectedSavedID = saved.ID
+			refreshSavedCharts()
+			if chartList != nil {
+				if selectedIndex := savedChartIndexByID(savedCharts, selectedSavedID); selectedIndex >= 0 {
+					chartList.Select(selectedIndex)
+				}
+			}
+			loadSavedChart(saved)
+			status.SetText(fmt.Sprintf("Saved progression chart %s", saved.Name))
+		}
+
+		buttons := container.NewGridWithColumns(2,
+			widget.NewButton("Cancel", dataWindow.Close),
+			widget.NewButton(actionText, cast),
+		)
+
+		content := container.NewBorder(nil, container.NewVBox(statusLabel, buttons), nil, nil, form)
+		dataWindow.SetContent(widget.NewCard(titleText, "Configure progression or direction parameters.", content))
+		dataWindow.Show()
+	}
+
+	showRelationshipDialog := func(relType astro.ChartType, editChart *storage.SavedChart) {
+		isEdit := editChart != nil
+		actionText := "Cast"
+		if isEdit {
+			actionText = "Save"
+		}
+
+		titleText := ""
+		switch relType {
+		case astro.ChartTypeComposite:
+			titleText = "Composite Chart"
+		case astro.ChartTypeDavison:
+			titleText = "Davison Midpoint Chart"
+		}
+
+		if isEdit {
+			titleText = "Edit " + titleText
+		} else {
+			titleText = "Cast " + titleText
+		}
+
+		dataWindow := application.NewWindow(titleText)
+		dataWindow.Resize(fyne.NewSize(450, 260))
+
+		options, lookup := getNatalCharts()
+		if len(options) < 2 {
+			dialog.ShowInformation("Insufficient Charts", "Please create at least two natal charts in your library to cast a relationship chart.", window)
+			return
+		}
+
+		baseSelect := createNatalSelector(options, lookup)
+
+		comparisonSelect := widget.NewSelect(nil, nil)
+
+		refreshComparisonOptions := func() {
+			compOpts := []string{}
+			for _, opt := range options {
+				if opt != baseSelect.Selected {
+					compOpts = append(compOpts, opt)
+				}
+			}
+			comparisonSelect.Options = compOpts
+			comparisonSelect.Refresh()
+			if len(compOpts) > 0 {
+				if comparisonSelect.Selected == "" || comparisonSelect.Selected == baseSelect.Selected {
+					comparisonSelect.SetSelected(compOpts[0])
+				}
+			}
+		}
+
+		nameEntry := widget.NewEntry()
+		updateName := func() {
+			if !isEdit {
+				prefix := "Composite"
+				if relType == astro.ChartTypeDavison {
+					prefix = "Davison"
+				}
+				baseName := ""
+				compName := ""
+				if b, ok := lookup[baseSelect.Selected]; ok {
+					baseName = b.Name
+				}
+				if c, ok := lookup[comparisonSelect.Selected]; ok {
+					compName = c.Name
+				}
+				nameEntry.SetText(fmt.Sprintf("%s - %s / %s", prefix, baseName, compName))
+			}
+		}
+
+		baseSelect.OnChanged = func(value string) {
+			refreshComparisonOptions()
+			updateName()
+		}
+		comparisonSelect.OnChanged = func(value string) {
+			updateName()
+		}
+
+		refreshComparisonOptions()
+
+		if isEdit {
+			nameEntry.SetText(editChart.Name)
+			if baseChart, ok := savedChartByID(savedCharts, editChart.BaseChartID); ok {
+				baseSelect.SetSelected(savedChartLabel(baseChart))
+			}
+			refreshComparisonOptions()
+			if comparisonChart, ok := savedChartByID(savedCharts, editChart.ComparisonChartID); ok {
+				comparisonSelect.SetSelected(savedChartLabel(comparisonChart))
+			}
+		} else {
+			updateName()
+		}
+
+		statusLabel := widget.NewLabel("")
+
+		cast := func() {
+			base := lookup[baseSelect.Selected]
+			comp, ok := lookup[comparisonSelect.Selected]
+			if !ok {
+				statusLabel.SetText("Please select a comparison chart")
+				return
+			}
+			if base.ID == comp.ID {
+				statusLabel.SetText("Base and Comparison charts must be different")
+				return
+			}
+
+			var saved storage.SavedChart
+			if isEdit {
+				saved = *editChart
+			} else {
+				saved = base
+				saved.ID = ""
+			}
+			saved.Name = nameEntry.Text
+			saved.ChartType = string(relType)
+			saved.BaseChartID = base.ID
+			saved.ComparisonChartID = comp.ID
+			saved.ReferenceDate = ""
+			saved.ReferenceTime = ""
+			saved.ReferenceUTC = ""
+			saved.RelocatedLatitude = ""
+			saved.RelocatedLongitude = ""
+			saved.RelocatedLocationName = ""
+			saved.DirectionKey = ""
+
+			if saveErr := store.Save(&saved); saveErr != nil {
+				statusLabel.SetText(saveErr.Error())
+				return
+			}
+			dataWindow.Close()
+			selectedSavedID = saved.ID
+			refreshSavedCharts()
+			if chartList != nil {
+				if selectedIndex := savedChartIndexByID(savedCharts, selectedSavedID); selectedIndex >= 0 {
+					chartList.Select(selectedIndex)
+				}
+			}
+			loadSavedChart(saved)
+			status.SetText(fmt.Sprintf("Saved relationship chart %s", saved.Name))
+		}
+
+		form := widget.NewForm(
+			widget.NewFormItem("First Natal Chart", baseSelect),
+			widget.NewFormItem("Second Natal Chart", comparisonSelect),
+			widget.NewFormItem("Chart Name", nameEntry),
+		)
+
+		buttons := container.NewGridWithColumns(2,
+			widget.NewButton("Cancel", dataWindow.Close),
+			widget.NewButton(actionText, cast),
+		)
+
+		content := container.NewBorder(nil, container.NewVBox(statusLabel, buttons), nil, nil, form)
+		dataWindow.SetContent(widget.NewCard(titleText, "Select two charts to cast/edit their midpoint chart.", content))
+		dataWindow.Show()
+	}
+
+	showEditDialog := func() {
+		if !hasActiveSavedChart {
+			status.SetText("Select a saved chart first")
+			return
+		}
+		cType := astro.ChartType(activeSavedChart.ChartType)
+		if cType == "" {
+			cType = astro.ChartTypeNatal
+		}
+
+		switch cType {
+		case astro.ChartTypeNatal:
+			showBirthDataDialog()
+		case astro.ChartTypeSolarReturn:
+			showSolarReturnDialog(&activeSavedChart)
+		case astro.ChartTypeLunarReturn:
+			showLunarReturnDialog(&activeSavedChart)
+		case astro.ChartTypeSecondaryProgression, astro.ChartTypeTertiaryProgression, astro.ChartTypeSolarArc, astro.ChartTypePrimaryDirection:
+			showProgressionDialog(cType, &activeSavedChart)
+		case astro.ChartTypeComposite, astro.ChartTypeDavison:
+			showRelationshipDialog(cType, &activeSavedChart)
+		}
+	}
+
+	showCompareDialog := func() {
+		dataWindow := application.NewWindow("Compare / Bi-wheel")
+		dataWindow.Resize(fyne.NewSize(400, 260))
+
+		nextName := widget.NewEntry()
+		nextName.SetText("New Bi-wheel")
+
+		baseSelect := widget.NewSelect(nil, nil)
+		comparisonSelect := widget.NewSelect(nil, nil)
+
+		derivedLookup := map[string]storage.SavedChart{}
+		options := []string{}
+		for _, saved := range savedCharts {
+			if saved.ChartType == string(astro.ChartTypeSynastry) {
+				continue
+			}
+			label := savedChartLabel(saved)
+			options = append(options, label)
+			derivedLookup[label] = saved
+		}
+		baseSelect.Options = options
+		comparisonSelect.Options = options
+
+		if len(options) > 0 {
+			if hasActiveSavedChart && activeSavedChart.ChartType != string(astro.ChartTypeSynastry) {
+				baseSelect.SetSelected(savedChartLabel(activeSavedChart))
+			} else {
+				baseSelect.SetSelected(options[0])
+			}
+			if len(options) > 1 {
+				comparisonSelect.SetSelected(options[1])
+			} else {
+				comparisonSelect.SetSelected(options[0])
+			}
+		}
 
 		create := func() {
-			selectedSavedID = ""
-			selectedType := chartTypeFromLabel(nextType.Selected)
-			base, ok := derivedLookup[nextBase.Selected]
+			base, ok := derivedLookup[baseSelect.Selected]
 			if !ok {
-				status.SetText("Select a natal base chart")
+				status.SetText("Select a base chart")
+				return
+			}
+			comparison, ok := derivedLookup[comparisonSelect.Selected]
+			if !ok {
+				status.SetText("Select a comparison chart")
+				return
+			}
+			if base.ID == comparison.ID {
+				status.SetText("Choose two different charts for comparison")
 				return
 			}
 
 			saved := base
 			saved.ID = ""
 			saved.Name = nextName.Text
-			saved.ChartType = string(selectedType)
+			saved.ChartType = string(astro.ChartTypeSynastry)
 			saved.BaseChartID = base.ID
-			saved.ComparisonChartID = ""
+			saved.ComparisonChartID = comparison.ID
 			saved.ReferenceDate = ""
 			saved.ReferenceTime = ""
 			saved.ReferenceUTC = ""
+			saved.RelocatedLatitude = ""
+			saved.RelocatedLongitude = ""
+			saved.RelocatedLocationName = ""
+			saved.DirectionKey = ""
 
-			if selectedType.RequiresComparisonChart() {
-				comparison, ok := derivedLookup[nextComparison.Selected]
-				if !ok {
-					status.SetText("Select a comparison chart")
-					return
-				}
-				if comparison.ID == base.ID {
-					status.SetText("Choose two different charts for synastry")
-					return
-				}
-				saved.ComparisonChartID = comparison.ID
-			}
-			if selectedType.RequiresReferenceTime() {
-				referenceUTC, err := parseReferenceDateTime(nextReferenceDate.Text, nextReferenceTime.Text)
-				if err != nil {
-					status.SetText(err.Error())
-					return
-				}
-				saved.ReferenceDate = nextReferenceDate.Text
-				saved.ReferenceTime = nextReferenceTime.Text
-				saved.ReferenceUTC = referenceUTC.Format(time.RFC3339)
-			}
 			if saveErr := store.Save(&saved); saveErr != nil {
 				status.SetText(saveErr.Error())
 				return
@@ -667,27 +1425,32 @@ func Launch() {
 					chartList.Select(selectedIndex)
 				}
 			}
-			status.SetText(fmt.Sprintf("Saved %s definition %s", selectedType.String(), saved.Name))
+			loadSavedChart(saved)
+			status.SetText(fmt.Sprintf("Created Bi-wheel comparison %s", saved.Name))
 		}
 
 		buttons := container.NewGridWithColumns(2,
 			widget.NewButton("Cancel", dataWindow.Close),
-			widget.NewButton("Create", create),
+			widget.NewButton("Compare", create),
 		)
-		dataWindow.SetContent(widget.NewCard("Derived Chart", "Create transit, synastry, progression, or return definitions from saved natal charts.", container.NewBorder(
+
+		form := widget.NewForm(
+			widget.NewFormItem("Name", nextName),
+			widget.NewFormItem("Base Chart", baseSelect),
+			widget.NewFormItem("Comparison Chart", comparisonSelect),
+		)
+
+		dataWindow.SetContent(widget.NewCard("Compare / Bi-wheel", "Select two charts to overlay in a bi-wheel.", container.NewBorder(
 			nil,
 			buttons,
 			nil,
 			nil,
-			container.NewVBox(
-				widget.NewForm(widget.NewFormItem("Chart type", nextType)),
-				derivedForm,
-			),
+			form,
 		)))
 		dataWindow.Show()
 	}
 
-	showBirthDataDialog := func() {
+	showBirthDataDialog = func() {
 		dataWindow := application.NewWindow("Birth Data")
 		dataWindow.Resize(fyne.NewSize(420, 360))
 
@@ -739,7 +1502,9 @@ func Launch() {
 			longitude.SetText(editLongitude.Text)
 			houseSystem.SetSelected(editHouseSystem.Selected)
 			dataWindow.Close()
-			calculate()
+			if calculateActiveChart() {
+				saveChart(selectedSavedID != "")
+			}
 		}
 
 		onSubmit := func(string) {
@@ -849,13 +1614,40 @@ func Launch() {
 		})
 	}
 
+	// Return submenu
+	returnSubmenu := fyne.NewMenu("Return Charts",
+		fyne.NewMenuItem("Solar Return", func() { showSolarReturnDialog(nil) }),
+		fyne.NewMenuItem("Lunar Return", func() { showLunarReturnDialog(nil) }),
+	)
+	returnMenuItem := fyne.NewMenuItem("New Return Chart", nil)
+	returnMenuItem.ChildMenu = returnSubmenu
+
+	// Progression submenu
+	progressionSubmenu := fyne.NewMenu("Progression / Direction Charts",
+		fyne.NewMenuItem("Secondary Progression", func() { showProgressionDialog(astro.ChartTypeSecondaryProgression, nil) }),
+		fyne.NewMenuItem("Tertiary Progression", func() { showProgressionDialog(astro.ChartTypeTertiaryProgression, nil) }),
+		fyne.NewMenuItem("Solar Arc", func() { showProgressionDialog(astro.ChartTypeSolarArc, nil) }),
+		fyne.NewMenuItem("Primary Directions", func() { showProgressionDialog(astro.ChartTypePrimaryDirection, nil) }),
+	)
+	progressionMenuItem := fyne.NewMenuItem("New Progression / Direction Chart", nil)
+	progressionMenuItem.ChildMenu = progressionSubmenu
+
+	// Relationship submenu
+	relationshipSubmenu := fyne.NewMenu("Relationship Charts",
+		fyne.NewMenuItem("Composite", func() { showRelationshipDialog(astro.ChartTypeComposite, nil) }),
+		fyne.NewMenuItem("Davison", func() { showRelationshipDialog(astro.ChartTypeDavison, nil) }),
+	)
+	relationshipMenuItem := fyne.NewMenuItem("New Relationship Chart", nil)
+	relationshipMenuItem.ChildMenu = relationshipSubmenu
+
 	window.SetMainMenu(fyne.NewMainMenu(
 		fyne.NewMenu("File",
 			fyne.NewMenuItem("New Natal Chart", showNewNatalChartDialog),
-			fyne.NewMenuItem("New Derived Chart", showNewDerivedChartDialog),
-			fyne.NewMenuItem("Edit Birth Data", showBirthDataDialog),
-			fyne.NewMenuItem("Calculate", calculate),
-			fyne.NewMenuItem("Save Chart", saveCurrentChart),
+			returnMenuItem,
+			progressionMenuItem,
+			relationshipMenuItem,
+			fyne.NewMenuItemSeparator(),
+			fyne.NewMenuItem("Compare / Bi-wheel...", showCompareDialog),
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("Quit", application.Quit),
 		),
@@ -907,41 +1699,7 @@ func Launch() {
 		if id < 0 || id >= len(savedCharts) {
 			return
 		}
-		selected := savedCharts[id]
-		selectedSavedID = selected.ID
-		activeSavedChart = selected
-		hasActiveSavedChart = true
-		activeChartType = chartTypeFromSaved(selected)
-		synastrySwapped = false
-		enabledChartObjects()
-		resolvedChart, err := resolver.Resolve(selected, savedCharts)
-		if err == nil {
-			if resolvedChart.Synastry != nil {
-				refreshSynastryChart(*resolvedChart.Synastry)
-				return
-			}
-			if resolvedChart.Single != nil && canCalculateSavedChart(selected) {
-				setFormFromSavedChart(selected)
-			}
-			if resolvedChart.Single != nil {
-				refreshChart(*resolvedChart.Single)
-				status.SetText(fmt.Sprintf("Loaded %s", selected.Name))
-				return
-			}
-			if canCalculateSavedChart(selected) {
-				setFormFromSavedChart(selected)
-				status.SetText("No chart data resolved")
-				return
-			}
-		}
-		if canCalculateSavedChart(selected) {
-			setFormFromSavedChart(selected)
-			status.SetText(err.Error())
-			updateWorkspaceChrome()
-			return
-		}
-		status.SetText(err.Error())
-		updateWorkspaceChrome()
+		loadSavedChart(savedCharts[id])
 	}
 	if selectedSavedID != "" {
 		if selectedIndex := savedChartIndexByID(savedCharts, selectedSavedID); selectedIndex >= 0 {
@@ -965,13 +1723,12 @@ func Launch() {
 			}
 		}, window)
 	})
+	editButton = widget.NewButtonWithIcon("Edit", theme.DocumentCreateIcon(), showEditDialog)
 	savedPanel := widget.NewCard("Chart Library", "Select a saved chart to load it.", container.NewBorder(
 		nil,
-		container.NewGridWithColumns(2,
-			widget.NewButtonWithIcon("Natal", theme.DocumentCreateIcon(), showNewNatalChartDialog),
-			widget.NewButtonWithIcon("Derived", theme.ContentAddIcon(), showNewDerivedChartDialog),
-			widget.NewButtonWithIcon("Save", theme.DocumentSaveIcon(), saveCurrentChart),
-			widget.NewButtonWithIcon("Save As", theme.ContentCopyIcon(), saveCurrentChartAsNew),
+		container.NewGridWithColumns(3,
+			editButton,
+			widget.NewButtonWithIcon("Compare", theme.VisibilityIcon(), showCompareDialog),
 			deleteLibraryButton,
 		),
 		nil,

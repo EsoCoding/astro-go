@@ -353,36 +353,46 @@ func inCanvasChartInfo(chart astro.Chart, palette chartPalette, size fyne.Size) 
 		subtitle = chart.ChartType.String() + " Chart"
 	}
 
+	chartName := chart.Name
+	skipDate := false
+	if chartName == "" {
+		localTime, _, _ := chartDisplayTime(chart)
+		chartName = localTime.Format("2 Jan 2006, Mon")
+		skipDate = true
+	}
+
 	objects := []fyne.CanvasObject{
-		textAt(chart.Name, palette.text, headerSize+2, x, y, true, assets.CourierFont),
+		textAt(chartName, palette.text, headerSize+2, x, y, true, assets.CourierFont),
 	}
 	y += 18
 	objects = append(objects, textAt(subtitle, palette.text, bodySize, x, y, true, assets.CourierFont))
 	y += 16
-	objects, _ = appendChartInfoDetails(objects, chart, palette, x, y, bodySize)
+	objects, _ = appendChartInfoDetails(objects, chart, palette, x, y, bodySize, false, skipDate)
 
 	return objects
 }
 
-func appendChartInfoDetails(objects []fyne.CanvasObject, chart astro.Chart, palette chartPalette, x, y float64, bodySize float32) ([]fyne.CanvasObject, float64) {
+func appendChartInfoDetails(objects []fyne.CanvasObject, chart astro.Chart, palette chartPalette, x, y float64, bodySize float32, alignRight bool, skipDate bool) ([]fyne.CanvasObject, float64) {
 	localTime, zoneAbbr, formattedOffset := chartDisplayTime(chart)
 
-	objects = append(objects, textAt(localTime.Format("2 Jan 2006, Mon"), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
+	if !skipDate {
+		objects = append(objects, textAtAligned(localTime.Format("2 Jan 2006, Mon"), palette.mutedText, bodySize, x, y, false, assets.CourierFont, alignRight))
+		y += 14
+	}
+	objects = append(objects, textAtAligned(fmt.Sprintf("%s %s %s", localTime.Format("15:04:05"), zoneAbbr, formattedOffset), palette.mutedText, bodySize, x, y, false, assets.CourierFont, alignRight))
 	y += 14
-	objects = append(objects, textAt(fmt.Sprintf("%s %s %s", localTime.Format("15:04:05"), zoneAbbr, formattedOffset), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
+	objects = append(objects, textAtAligned(shortenLocationName(chart.LocationName), palette.text, bodySize, x, y, false, assets.CourierFont, alignRight))
 	y += 14
-	objects = append(objects, textAt(shortenLocationName(chart.LocationName), palette.text, bodySize, x, y, false, assets.CourierFont))
-	y += 14
-	objects = append(objects, textAt(formatCoordsDMS(chart.Latitude, chart.Longitude), palette.text, bodySize, x, y, false, assets.CourierFont))
+	objects = append(objects, textAtAligned(formatCoordsDMS(chart.Latitude, chart.Longitude), palette.text, bodySize, x, y, false, assets.CourierFont, alignRight))
 	y += 18
 
-	objects = append(objects, textAtItalic("Geocentric", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	objects = append(objects, textAtItalicAligned("Geocentric", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont, alignRight))
 	y += 12
-	objects = append(objects, textAtItalic("Tropical", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	objects = append(objects, textAtItalicAligned("Tropical", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont, alignRight))
 	y += 12
-	objects = append(objects, textAtItalic(chart.HouseSystem.Label(), palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	objects = append(objects, textAtItalicAligned(chart.HouseSystem.Label(), palette.mutedText, bodySize-1, x, y, true, assets.CourierFont, alignRight))
 	y += 12
-	objects = append(objects, textAtItalic("Mean Node", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	objects = append(objects, textAtItalicAligned("Mean Node", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont, alignRight))
 	y += 12
 
 	return objects, y
@@ -453,6 +463,42 @@ func textAtItalic(value string, clr color.Color, size float32, x, y float64, ita
 	text.TextStyle = fyne.TextStyle{Italic: italic}
 	text.FontSource = font
 	text.Move(fyne.NewPos(float32(x), float32(y)))
+	return text
+}
+
+func textAtAligned(value string, clr color.Color, size float32, x, y float64, bold bool, font fyne.Resource, alignRight bool) fyne.CanvasObject {
+	if alignRight {
+		return textAtRight(value, clr, size, x, y, bold, font)
+	}
+	return textAt(value, clr, size, x, y, bold, font)
+}
+
+func textAtItalicAligned(value string, clr color.Color, size float32, x, y float64, italic bool, font fyne.Resource, alignRight bool) fyne.CanvasObject {
+	if alignRight {
+		return textAtItalicRight(value, clr, size, x, y, italic, font)
+	}
+	return textAtItalic(value, clr, size, x, y, italic, font)
+}
+
+func textAtRight(value string, clr color.Color, size float32, rightX, y float64, bold bool, font fyne.Resource) fyne.CanvasObject {
+	text := canvas.NewText(value, clr)
+	text.TextSize = size
+	text.TextStyle = fyne.TextStyle{Bold: bold}
+	text.FontSource = font
+	text.Alignment = fyne.TextAlignTrailing
+	text.Resize(fyne.NewSize(240, size*1.25))
+	text.Move(fyne.NewPos(float32(rightX-240), float32(y)))
+	return text
+}
+
+func textAtItalicRight(value string, clr color.Color, size float32, rightX, y float64, italic bool, font fyne.Resource) fyne.CanvasObject {
+	text := canvas.NewText(value, clr)
+	text.TextSize = size
+	text.TextStyle = fyne.TextStyle{Italic: italic}
+	text.FontSource = font
+	text.Alignment = fyne.TextAlignTrailing
+	text.Resize(fyne.NewSize(240, size*1.25))
+	text.Move(fyne.NewPos(float32(rightX-240), float32(y)))
 	return text
 }
 
