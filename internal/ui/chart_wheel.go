@@ -82,7 +82,7 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 	outer := drawSize * 0.47
 	zodiacInner := drawSize * 0.415
 	planetExactRadius := zodiacInner
-	planetRadius := zodiacInner - drawSize*0.035
+	planetRadius := zodiacInner - drawSize*0.05
 	houseOuter := drawSize * 0.255
 	houseInner := drawSize * 0.205
 	houseNumberRadius := houseInner + (houseOuter-houseInner)*0.58
@@ -216,13 +216,18 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 		objects = append(objects, symbol)
 	}
 
-	for _, placement := range planetPlacements(chart.Planets, planetRadius, drawSize*0.024) {
+	placements := planetPlacements(chart.Planets, centerX, centerY, planetExactRadius, planetRadius, ascendant, drawSize*0.025, float64(planetTextSize))
+	for _, placement := range placements {
 		ex, ey := chartPoint(centerX, centerY, planetExactRadius, placement.position.Longitude, ascendant)
-		gx, gy := shiftedChartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant, placement.tangentOffset)
+		lx, ly := planetLineEndpoint(centerX, centerY, placement.x, placement.y, float64(planetTextSize)*0.85)
 		stroke := planetColor(placement.position.Planet, palette)
-		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
+		objects = append(objects, line(ex, ey, lx, ly, stroke, 1.15))
+	}
+	for _, placement := range placements {
+		ex, ey := chartPoint(centerX, centerY, planetExactRadius, placement.position.Longitude, ascendant)
+		stroke := planetColor(placement.position.Planet, palette)
 		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
-		objects = append(objects, planetLabelObjects(placement.position, centerX, centerY, gx, gy, planetTextSize, coordTextSize, stroke)...)
+		objects = append(objects, planetLabelObjects(placement.position, centerX, centerY, placement.x, placement.y, planetTextSize, coordTextSize, stroke)...)
 	}
 
 	ascText := canvas.NewText(fmt.Sprintf("Asc %s", formatZodiacDMS(chart.Ascendant.Longitude)), palette.accent)
@@ -243,9 +248,9 @@ func chartWheelObjects(chart astro.Chart, size fyne.Size) []fyne.CanvasObject {
 }
 
 type planetPlacement struct {
-	position      astro.PlanetPosition
-	radius        float64
-	tangentOffset float64
+	position astro.PlanetPosition
+	x        float64
+	y        float64
 }
 
 type chartPalette struct {
@@ -343,6 +348,47 @@ func inCanvasChartInfo(chart astro.Chart, palette chartPalette, size fyne.Size) 
 	headerSize := float32(12)
 	bodySize := float32(10)
 
+	subtitle := "Event Chart"
+	if chart.ChartType != "" {
+		subtitle = chart.ChartType.String() + " Chart"
+	}
+
+	objects := []fyne.CanvasObject{
+		textAt(chart.Name, palette.text, headerSize+2, x, y, true, assets.CourierFont),
+	}
+	y += 18
+	objects = append(objects, textAt(subtitle, palette.text, bodySize, x, y, true, assets.CourierFont))
+	y += 16
+	objects, _ = appendChartInfoDetails(objects, chart, palette, x, y, bodySize)
+
+	return objects
+}
+
+func appendChartInfoDetails(objects []fyne.CanvasObject, chart astro.Chart, palette chartPalette, x, y float64, bodySize float32) ([]fyne.CanvasObject, float64) {
+	localTime, zoneAbbr, formattedOffset := chartDisplayTime(chart)
+
+	objects = append(objects, textAt(localTime.Format("2 Jan 2006, Mon"), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
+	y += 14
+	objects = append(objects, textAt(fmt.Sprintf("%s %s %s", localTime.Format("15:04:05"), zoneAbbr, formattedOffset), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
+	y += 14
+	objects = append(objects, textAt(shortenLocationName(chart.LocationName), palette.text, bodySize, x, y, false, assets.CourierFont))
+	y += 14
+	objects = append(objects, textAt(formatCoordsDMS(chart.Latitude, chart.Longitude), palette.text, bodySize, x, y, false, assets.CourierFont))
+	y += 18
+
+	objects = append(objects, textAtItalic("Geocentric", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	y += 12
+	objects = append(objects, textAtItalic("Tropical", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	y += 12
+	objects = append(objects, textAtItalic(chart.HouseSystem.Label(), palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	y += 12
+	objects = append(objects, textAtItalic("Mean Node", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
+	y += 12
+
+	return objects, y
+}
+
+func chartDisplayTime(chart astro.Chart) (time.Time, string, string) {
 	localTime := chart.DateTimeUTC
 	zoneAbbr := "UTC"
 	formattedOffset := "+00:00"
@@ -380,37 +426,7 @@ func inCanvasChartInfo(chart astro.Chart, palette chartPalette, size fyne.Size) 
 			formattedOffset = fmt.Sprintf("%s%02d:%02d", sign, hours, minutes)
 		}
 	}
-
-	subtitle := "Event Chart"
-	if chart.ChartType != "" {
-		subtitle = chart.ChartType.String() + " Chart"
-	}
-
-	objects := []fyne.CanvasObject{
-		textAt(chart.Name, palette.text, headerSize+2, x, y, true, assets.CourierFont),
-	}
-	y += 18
-	objects = append(objects, textAt(subtitle, palette.text, bodySize, x, y, true, assets.CourierFont))
-	y += 16
-	objects = append(objects, textAt(localTime.Format("2 Jan 2006, Mon"), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
-	y += 14
-	objects = append(objects, textAt(fmt.Sprintf("%s %s %s", localTime.Format("15:04:05"), zoneAbbr, formattedOffset), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
-	y += 14
-	objects = append(objects, textAt(shortenLocationName(chart.LocationName), palette.text, bodySize, x, y, false, assets.CourierFont))
-	y += 14
-	objects = append(objects, textAt(formatCoordsDMS(chart.Latitude, chart.Longitude), palette.text, bodySize, x, y, false, assets.CourierFont))
-	y += 18
-
-	// Calculation settings (in italics)
-	objects = append(objects, textAtItalic("Geocentric", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
-	y += 12
-	objects = append(objects, textAtItalic("Tropical", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
-	y += 12
-	objects = append(objects, textAtItalic(chart.HouseSystem.Label(), palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
-	y += 12
-	objects = append(objects, textAtItalic("Mean Node", palette.mutedText, bodySize-1, x, y, true, assets.CourierFont))
-
-	return objects
+	return localTime, zoneAbbr, formattedOffset
 }
 
 func panelBlock(x, y, width, height float64, palette chartPalette) fyne.CanvasObject {
@@ -549,12 +565,12 @@ func planetLabelObjects(position astro.PlanetPosition, centerX, centerY, x, y fl
 
 	degrees, minutes := zodiacDegreeMinuteParts(position.Longitude)
 	inwardX, inwardY := inwardUnit(centerX, centerY, x, y)
-	degreeX := x + inwardX*float64(planetTextSize)*0.72
-	degreeY := y + inwardY*float64(planetTextSize)*0.72
-	signX := x + inwardX*float64(planetTextSize)*1.08
-	signY := y + inwardY*float64(planetTextSize)*1.08
-	minuteX := x + inwardX*float64(planetTextSize)*1.44
-	minuteY := y + inwardY*float64(planetTextSize)*1.44
+	degreeX := x + inwardX*float64(planetTextSize)*0.68
+	degreeY := y + inwardY*float64(planetTextSize)*0.68
+	signX := x + inwardX*float64(planetTextSize)*1.14
+	signY := y + inwardY*float64(planetTextSize)*1.14
+	minuteX := x + inwardX*float64(planetTextSize)*1.6
+	minuteY := y + inwardY*float64(planetTextSize)*1.6
 	degreeText := canvas.NewText(fmt.Sprintf("%02d", degrees), color.Black)
 	degreeText.TextSize = detailSize
 	degreeText.FontSource = assets.CourierFont
@@ -585,6 +601,11 @@ func planetLabelObjects(position astro.PlanetPosition, centerX, centerY, x, y fl
 
 func centeredTextPosition(x, y float64, textSize float32) fyne.Position {
 	return fyne.NewPos(float32(x)-textSize*0.58, float32(y)-textSize*0.5)
+}
+
+func planetLineEndpoint(centerX, centerY, x, y, outwardOffset float64) (float64, float64) {
+	inwardX, inwardY := inwardUnit(centerX, centerY, x, y)
+	return x - inwardX*outwardOffset, y - inwardY*outwardOffset
 }
 
 func inwardUnit(centerX, centerY, x, y float64) (float64, float64) {
@@ -634,51 +655,211 @@ func chartPoint(cx, cy, radius, longitude, ascendant float64) (float64, float64)
 	return cx + math.Cos(radian)*radius, cy - math.Sin(radian)*radius
 }
 
-func shiftedChartPoint(cx, cy, radius, longitude, ascendant, tangentOffset float64) (float64, float64) {
-	x, y := chartPoint(cx, cy, radius, longitude, ascendant)
-	if tangentOffset == 0 {
-		return x, y
-	}
-
-	dx := x - cx
-	dy := y - cy
-	length := math.Hypot(dx, dy)
-	if length == 0 {
-		return x, y
-	}
-	return x - dy/length*tangentOffset, y + dx/length*tangentOffset
+type planetPlacementCandidate struct {
+	x float64
+	y float64
 }
 
-func planetPlacements(planets []astro.PlanetPosition, baseRadius, step float64) []planetPlacement {
+type planetPlacementObstacle struct {
+	x     float64
+	y     float64
+	lineX float64
+	lineY float64
+}
+
+func planetPlacements(planets []astro.PlanetPosition, centerX, centerY, anchorRadius, baseRadius, ascendant, step, labelSize float64) []planetPlacement {
 	sorted := append([]astro.PlanetPosition(nil), planets...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return sorted[i].Longitude < sorted[j].Longitude
 	})
 
 	placements := make([]planetPlacement, 0, len(sorted))
-	clusterDepth := 0
-	var previousLongitude float64
-	for i, position := range sorted {
-		if i == 0 || angularGap(previousLongitude, position.Longitude) > 8 {
-			clusterDepth = 0
-		} else {
-			clusterDepth++
-		}
-		offset := 0.0
-		if clusterDepth > 0 {
-			offset = float64((clusterDepth+1)/2) * step
-			if clusterDepth%2 == 0 {
-				offset = -offset
-			}
-		}
-		placements = append(placements, planetPlacement{
-			position:      position,
-			radius:        baseRadius,
-			tangentOffset: offset,
-		})
-		previousLongitude = position.Longitude
+	for _, cluster := range closePlanetClusters(sorted, 4.5) {
+		placements = append(placements, optimizedPlanetCluster(cluster, sorted, centerX, centerY, anchorRadius, baseRadius, ascendant, step, labelSize)...)
 	}
 	return placements
+}
+
+func optimizedPlanetCluster(cluster, allPlanets []astro.PlanetPosition, centerX, centerY, anchorRadius, baseRadius, ascendant, step, labelSize float64) []planetPlacement {
+	if len(cluster) == 1 {
+		x, y := chartPoint(centerX, centerY, baseRadius, cluster[0].Longitude, ascendant)
+		return []planetPlacement{{position: cluster[0], x: x, y: y}}
+	}
+	if len(cluster) > 5 {
+		return fallbackPlanetCluster(cluster, centerX, centerY, baseRadius, ascendant, step)
+	}
+
+	candidates := make([][]planetPlacementCandidate, len(cluster))
+	for i, position := range cluster {
+		candidates[i] = planetPlacementCandidates(centerX, centerY, baseRadius, position.Longitude, ascendant, step)
+	}
+	obstacles := planetPlacementObstacles(allPlanets, cluster, centerX, centerY, anchorRadius, baseRadius, ascendant)
+
+	best := make([]planetPlacementCandidate, len(cluster))
+	current := make([]planetPlacementCandidate, len(cluster))
+	bestScore := math.Inf(1)
+	var search func(int)
+	search = func(index int) {
+		if index == len(cluster) {
+			score := planetPlacementScore(cluster, current, obstacles, centerX, centerY, anchorRadius, baseRadius, ascendant, labelSize)
+			if score < bestScore {
+				bestScore = score
+				copy(best, current)
+			}
+			return
+		}
+		for _, candidate := range candidates[index] {
+			current[index] = candidate
+			search(index + 1)
+		}
+	}
+	search(0)
+
+	placements := make([]planetPlacement, 0, len(cluster))
+	for i, position := range cluster {
+		placements = append(placements, planetPlacement{
+			position: position,
+			x:        best[i].x,
+			y:        best[i].y,
+		})
+	}
+	return placements
+}
+
+func planetPlacementObstacles(allPlanets, cluster []astro.PlanetPosition, centerX, centerY, anchorRadius, baseRadius, ascendant float64) []planetPlacementObstacle {
+	obstacles := make([]planetPlacementObstacle, 0, len(allPlanets)-len(cluster))
+	for _, position := range allPlanets {
+		if clusterContainsPlanet(cluster, position) {
+			continue
+		}
+		x, y := chartPoint(centerX, centerY, baseRadius, position.Longitude, ascendant)
+		lineX, lineY := chartPoint(centerX, centerY, anchorRadius, position.Longitude, ascendant)
+		obstacles = append(obstacles, planetPlacementObstacle{
+			x:     x,
+			y:     y,
+			lineX: lineX,
+			lineY: lineY,
+		})
+	}
+	return obstacles
+}
+
+func clusterContainsPlanet(cluster []astro.PlanetPosition, position astro.PlanetPosition) bool {
+	for _, member := range cluster {
+		if member.Planet == position.Planet {
+			return true
+		}
+	}
+	return false
+}
+
+func fallbackPlanetCluster(cluster []astro.PlanetPosition, centerX, centerY, baseRadius, ascendant, step float64) []planetPlacement {
+	placements := make([]planetPlacement, 0, len(cluster))
+	center := float64(len(cluster)-1) / 2
+	for i, position := range cluster {
+		x, y := shiftedPoint(centerX, centerY, baseRadius, position.Longitude, ascendant, (float64(i)-center)*step, 0)
+		placements = append(placements, planetPlacement{position: position, x: x, y: y})
+	}
+	return placements
+}
+
+func planetPlacementCandidates(centerX, centerY, baseRadius, longitude, ascendant, step float64) []planetPlacementCandidate {
+	tangentOffsets := []float64{-step * 0.75, -step * 0.35, 0, step * 0.35, step * 0.75}
+	radialOffsets := []float64{0, -step * 0.18, -step * 0.35}
+	candidates := make([]planetPlacementCandidate, 0, len(tangentOffsets)*len(radialOffsets))
+	for _, tangentOffset := range tangentOffsets {
+		for _, radialOffset := range radialOffsets {
+			x, y := shiftedPoint(centerX, centerY, baseRadius, longitude, ascendant, tangentOffset, radialOffset)
+			candidates = append(candidates, planetPlacementCandidate{x: x, y: y})
+		}
+	}
+	return candidates
+}
+
+func shiftedPoint(cx, cy, radius, longitude, ascendant, tangentOffset, radialOffset float64) (float64, float64) {
+	x, y := chartPoint(cx, cy, radius, longitude, ascendant)
+	dx := x - cx
+	dy := y - cy
+	length := math.Hypot(dx, dy)
+	if length == 0 {
+		return x, y
+	}
+
+	radialX := dx / length
+	radialY := dy / length
+	tangentX := -radialY
+	tangentY := radialX
+	return x + tangentX*tangentOffset + radialX*radialOffset, y + tangentY*tangentOffset + radialY*radialOffset
+}
+
+func planetPlacementScore(cluster []astro.PlanetPosition, candidates []planetPlacementCandidate, obstacles []planetPlacementObstacle, centerX, centerY, anchorRadius, baseRadius, ascendant, labelSize float64) float64 {
+	score := 0.0
+	for i, candidate := range candidates {
+		baseX, baseY := chartPoint(centerX, centerY, anchorRadius, cluster[i].Longitude, ascendant)
+		naturalX, naturalY := chartPoint(centerX, centerY, baseRadius, cluster[i].Longitude, ascendant)
+		score += math.Hypot(candidate.x-naturalX, candidate.y-naturalY) * 1.4
+		for _, obstacle := range obstacles {
+			score += labelOverlapPenalty(candidate, planetPlacementCandidate{x: obstacle.x, y: obstacle.y}, labelSize) * 1.8
+			if segmentsIntersect(baseX, baseY, candidate.x, candidate.y, obstacle.lineX, obstacle.lineY, obstacle.x, obstacle.y) {
+				score += 260
+			}
+		}
+		for j := i + 1; j < len(candidates); j++ {
+			score += labelOverlapPenalty(candidate, candidates[j], labelSize)
+			nextBaseX, nextBaseY := chartPoint(centerX, centerY, anchorRadius, cluster[j].Longitude, ascendant)
+			if segmentsIntersect(baseX, baseY, candidate.x, candidate.y, nextBaseX, nextBaseY, candidates[j].x, candidates[j].y) {
+				score += 420
+			}
+		}
+	}
+	return score
+}
+
+func labelOverlapPenalty(a, b planetPlacementCandidate, labelSize float64) float64 {
+	width := labelSize * 1.55
+	height := labelSize * 2.8
+	overlapX := width - math.Abs(a.x-b.x)
+	overlapY := height - math.Abs(a.y-b.y)
+	if overlapX <= 0 || overlapY <= 0 {
+		return 0
+	}
+	return overlapX*overlapY*8 + 500
+}
+
+func segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy float64) bool {
+	return orientation(ax, ay, bx, by, cx, cy)*orientation(ax, ay, bx, by, dx, dy) < 0 &&
+		orientation(cx, cy, dx, dy, ax, ay)*orientation(cx, cy, dx, dy, bx, by) < 0
+}
+
+func orientation(ax, ay, bx, by, cx, cy float64) float64 {
+	return (bx-ax)*(cy-ay) - (by-ay)*(cx-ax)
+}
+
+func closePlanetClusters(planets []astro.PlanetPosition, maxGap float64) [][]astro.PlanetPosition {
+	if len(planets) == 0 {
+		return nil
+	}
+
+	clusters := [][]astro.PlanetPosition{{planets[0]}}
+	for _, position := range planets[1:] {
+		current := clusters[len(clusters)-1]
+		previous := current[len(current)-1]
+		if angularGap(previous.Longitude, position.Longitude) <= maxGap {
+			clusters[len(clusters)-1] = append(current, position)
+			continue
+		}
+		clusters = append(clusters, []astro.PlanetPosition{position})
+	}
+
+	if len(clusters) > 1 {
+		first := clusters[0]
+		last := clusters[len(clusters)-1]
+		if angularGap(last[len(last)-1].Longitude, first[0].Longitude) <= maxGap {
+			merged := append(append([]astro.PlanetPosition{}, last...), first...)
+			clusters = append([][]astro.PlanetPosition{merged}, clusters[1:len(clusters)-1]...)
+		}
+	}
+	return clusters
 }
 
 func angularGap(a, b float64) float64 {

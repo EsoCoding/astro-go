@@ -80,17 +80,20 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 	houseBandWidth := drawSize * 0.028
 	outerZodiacInner := outerZodiacOuter - zodiacBandWidth
 	outerZodiacSignRadius := (outerZodiacOuter + outerZodiacInner) * 0.5
-	outer := drawSize * 0.325
+	outer := drawSize * 0.312
 	middle := outer - zodiacBandWidth
 	outerHouseInner := outer
 	outerHouseOuter := outerHouseInner + houseBandWidth
-	outerPlanetExactRadius := outerZodiacInner - drawSize*0.035
-	outerPlanetRadius := outerPlanetExactRadius - drawSize*0.004
-	innerHouseOuter := drawSize * 0.152
+	outerPlanetExactRadius := outerZodiacInner
+	planetBandWidth := outerZodiacInner - outerHouseOuter
+	planetLabelRadiusRatio := 0.58
+	outerPlanetRadius := outerHouseOuter + planetBandWidth*planetLabelRadiusRatio
+	innerHouseOuter := middle - planetBandWidth - drawSize*0.025
 	innerHouseInner := innerHouseOuter - houseBandWidth
 	aspectRadius := innerHouseInner
 	innerPlanetExactRadius := middle
-	innerPlanetRadius := middle - drawSize*0.036
+	innerPlanetBandWidth := middle - innerHouseOuter
+	innerPlanetRadius := innerHouseOuter + innerPlanetBandWidth*planetLabelRadiusRatio
 	signRadius := (outer + middle) * 0.5
 	innerZodiacCuspDegreeRadius := signRadius
 	outerZodiacCuspDegreeRadius := outerZodiacSignRadius
@@ -254,35 +257,33 @@ func synastryWheelObjects(chart astro.SynastryChart, size fyne.Size) []fyne.Canv
 		objects = append(objects, symbol)
 	}
 
-	for _, placement := range planetPlacements(chart.InnerChart.Planets, innerPlanetRadius, drawSize*0.024) {
+	innerPlacements := planetPlacements(chart.InnerChart.Planets, centerX, centerY, innerPlanetExactRadius, innerPlanetRadius, ascendant, drawSize*0.025, float64(planetTextSize))
+	outerPlacements := planetPlacements(chart.OuterChart.Planets, centerX, centerY, outerPlanetExactRadius, outerPlanetRadius, ascendant, drawSize*0.025, float64(planetTextSize))
+
+	for _, placement := range innerPlacements {
 		ex, ey := chartPoint(centerX, centerY, innerPlanetExactRadius, placement.position.Longitude, ascendant)
-		gx, gy := shiftedChartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant, placement.tangentOffset)
+		lx, ly := planetLineEndpoint(centerX, centerY, placement.x, placement.y, float64(planetTextSize)*0.85)
 		stroke := planetColor(placement.position.Planet, palette)
-		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
-		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
-		objects = append(objects, planetLabelObjects(placement.position, centerX, centerY, gx, gy, planetTextSize, coordTextSize, stroke)...)
+		objects = append(objects, line(ex, ey, lx, ly, stroke, 1.15))
 	}
-
-	for _, placement := range planetPlacements(chart.OuterChart.Planets, outerPlanetRadius, drawSize*0.024) {
+	for _, placement := range outerPlacements {
 		ex, ey := chartPoint(centerX, centerY, outerPlanetExactRadius, placement.position.Longitude, ascendant)
-		gx, gy := shiftedChartPoint(centerX, centerY, placement.radius, placement.position.Longitude, ascendant, placement.tangentOffset)
-		stroke := withAlpha(planetColor(placement.position.Planet, palette), 220)
-		objects = append(objects, line(ex, ey, gx, gy, stroke, 0.8))
-		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
-		objects = append(objects, planetLabelObjects(placement.position, centerX, centerY, gx, gy, planetTextSize, coordTextSize, stroke)...)
+		lx, ly := planetLineEndpoint(centerX, centerY, placement.x, placement.y, float64(planetTextSize)*0.85)
+		stroke := withAlpha(planetColor(placement.position.Planet, palette), 245)
+		objects = append(objects, line(ex, ey, lx, ly, stroke, 1.15))
 	}
-
-	innerText := canvas.NewText(fmt.Sprintf("Inner %s", chart.InnerChart.Name), palette.text)
-	innerText.TextSize = coordTextSize
-	innerText.FontSource = assets.CourierFont
-	innerText.Move(fyne.NewPos(float32(centerX-outerHouseOuter), float32(centerY+outerHouseOuter+float64(coordTextSize)*0.4)))
-	objects = append(objects, innerText)
-
-	outerText := canvas.NewText(fmt.Sprintf("Outer %s", chart.OuterChart.Name), palette.mutedText)
-	outerText.TextSize = coordTextSize
-	outerText.FontSource = assets.CourierFont
-	outerText.Move(fyne.NewPos(float32(centerX-outerHouseOuter), float32(centerY+outerHouseOuter+float64(coordTextSize)*1.9)))
-	objects = append(objects, outerText)
+	for _, placement := range innerPlacements {
+		ex, ey := chartPoint(centerX, centerY, innerPlanetExactRadius, placement.position.Longitude, ascendant)
+		stroke := planetColor(placement.position.Planet, palette)
+		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
+		objects = append(objects, planetLabelObjects(placement.position, centerX, centerY, placement.x, placement.y, planetTextSize, coordTextSize, stroke)...)
+	}
+	for _, placement := range outerPlacements {
+		ex, ey := chartPoint(centerX, centerY, outerPlanetExactRadius, placement.position.Longitude, ascendant)
+		stroke := withAlpha(planetColor(placement.position.Planet, palette), 245)
+		objects = append(objects, filledCircle(ex, ey, drawSize*0.0045, stroke, stroke, 0.5))
+		objects = append(objects, planetLabelObjects(placement.position, centerX, centerY, placement.x, placement.y, planetTextSize, coordTextSize, stroke)...)
+	}
 
 	objects = append(objects, inCanvasSynastryInfo(chart, palette, size)...)
 
@@ -362,14 +363,18 @@ func inCanvasSynastryInfo(chart astro.SynastryChart, palette chartPalette, size 
 	objects := []fyne.CanvasObject{
 		textAt(chart.Name, palette.text, headerSize+2, x, y, true, assets.CourierFont),
 	}
-	y += 24
-	objects = append(objects, textAt("Inner "+chart.InnerChart.Name, palette.text, bodySize, x, y, true, assets.CourierFont))
+	y += 18
+	objects = append(objects, textAt("Inner Chart", palette.text, bodySize, x, y, true, assets.CourierFont))
 	y += 16
-	objects = append(objects, textAt(chart.InnerChart.DateTimeUTC.Format("2006-01-02 15:04 UTC"), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
+	objects = append(objects, textAt(chart.InnerChart.Name, palette.text, bodySize, x, y, true, assets.CourierFont))
 	y += 16
-	objects = append(objects, textAt("Outer "+chart.OuterChart.Name, palette.text, bodySize, x, y, true, assets.CourierFont))
+	objects, y = appendChartInfoDetails(objects, chart.InnerChart, palette, x, y, bodySize)
+	y += 12
+	objects = append(objects, textAt("Outer Chart", palette.mutedText, bodySize, x, y, true, assets.CourierFont))
 	y += 16
-	objects = append(objects, textAt(chart.OuterChart.DateTimeUTC.Format("2006-01-02 15:04 UTC"), palette.mutedText, bodySize, x, y, false, assets.CourierFont))
+	objects = append(objects, textAt(chart.OuterChart.Name, palette.text, bodySize, x, y, true, assets.CourierFont))
+	y += 16
+	objects, _ = appendChartInfoDetails(objects, chart.OuterChart, palette, x, y, bodySize)
 
 	return objects
 }

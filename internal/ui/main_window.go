@@ -76,7 +76,7 @@ func Launch() {
 
 	if initial.Name == "" {
 		settings, _ := store.GetSettings()
-		
+
 		loc, err := time.LoadLocation("Europe/Amsterdam")
 		if err != nil {
 			loc = time.UTC
@@ -92,7 +92,7 @@ func Launch() {
 		defaultLat := 52.3676
 		defaultLng := 4.9041
 		defaultLocName := "Amsterdam, Netherlands"
-		
+
 		if settings.DefaultLat != "" && settings.DefaultLng != "" {
 			if lat, err := strconv.ParseFloat(settings.DefaultLat, 64); err == nil {
 				defaultLat = lat
@@ -160,6 +160,50 @@ func Launch() {
 	status := widget.NewLabel("Ready")
 	currentInputSummary := widget.NewLabel(currentChartInputSummary(name.Text, date.Text, clock.Text))
 	var chartList *widget.List
+	activeChartType := astro.ChartTypeNatal
+	activeSavedChart := storage.SavedChart{}
+	hasActiveSavedChart := false
+	var activeSynastryChart *astro.SynastryChart
+	synastrySwapped := false
+	var workspaceLabel *widget.Label
+	var activeTimeLabel *widget.Label
+	var stepAmount *widget.Entry
+	var stepUnit *widget.Select
+	var backButton *widget.Button
+	var forwardButton *widget.Button
+	var swapButton *widget.Button
+
+	updateWorkspaceChrome := func() {
+		if workspaceLabel != nil {
+			workspaceLabel.SetText(workspaceTitle(activeChartType))
+		}
+		if activeTimeLabel != nil {
+			activeTimeLabel.SetText(activeTimeText(activeChartType, activeSavedChart, hasActiveSavedChart, date.Text, clock.Text))
+		}
+		canNavigate := activeChartType == astro.ChartTypeNatal || activeChartType.RequiresReferenceTime()
+		if backButton != nil {
+			if canNavigate {
+				backButton.Enable()
+			} else {
+				backButton.Disable()
+			}
+		}
+		if forwardButton != nil {
+			if canNavigate {
+				forwardButton.Enable()
+			} else {
+				forwardButton.Disable()
+			}
+		}
+		if swapButton != nil {
+			if activeSynastryChart != nil {
+				swapButton.Show()
+				swapButton.Enable()
+			} else {
+				swapButton.Hide()
+			}
+		}
+	}
 
 	setFormFromSavedChart := func(saved storage.SavedChart) {
 		selectedSavedID = saved.ID
@@ -247,19 +291,23 @@ func Launch() {
 
 	refreshChart := func(c astro.Chart) {
 		currentChart = c
+		activeSynastryChart = nil
 		wheelSlot.Objects = []fyne.CanvasObject{NewChartWheel(c)}
 		wheelSlot.Refresh()
 		positionsSlot.Objects = []fyne.CanvasObject{buildNatalPositions(c)}
 		positionsSlot.Refresh()
+		updateWorkspaceChrome()
 	}
 
 	refreshSynastryChart := func(synastry astro.SynastryChart) {
 		currentChart = synastry.InnerChart
+		activeSynastryChart = &synastry
 		wheelSlot.Objects = []fyne.CanvasObject{NewSynastryWheel(synastry)}
 		wheelSlot.Refresh()
 		positionsSlot.Objects = []fyne.CanvasObject{buildSynastryPositions(synastry)}
 		positionsSlot.Refresh()
-		status.SetText(fmt.Sprintf("Loaded Synastry %s x %s", synastry.InnerChart.Name, synastry.OuterChart.Name))
+		updateWorkspaceChrome()
+		status.SetText(fmt.Sprintf("Loaded %s %s x %s", activeChartType.String(), synastry.InnerChart.Name, synastry.OuterChart.Name))
 	}
 
 	calculateActiveChart := func() bool {
@@ -274,12 +322,88 @@ func Launch() {
 			return false
 		}
 		currentInputSummary.SetText(currentChartInputSummary(name.Text, date.Text, clock.Text))
+		activeChartType = astro.ChartTypeNatal
+		hasActiveSavedChart = false
+		synastrySwapped = false
 		refreshChart(nextChart)
 		return true
 	}
 
 	calculate := func() {
 		calculateActiveChart()
+	}
+
+	navigateTime := func(direction int) {
+		amount, err := strconv.Atoi(stepAmount.Text)
+		if err != nil || amount <= 0 {
+			status.SetText("Step must be a positive whole number")
+			return
+		}
+		unit := stepUnit.Selected
+		if unit == "" {
+			unit = timeStepUnitMinute
+		}
+		amount *= direction
+
+		if activeChartType == astro.ChartTypeNatal {
+			localTime, err := parseLocalDateTime(date.Text, clock.Text)
+			if err != nil {
+				status.SetText("date/time must use YYYY-MM-DD and HH:MM or HH:MM:SS")
+				return
+			}
+			nextTime := stepTime(localTime, unit, amount)
+			date.SetText(nextTime.Format("2006-01-02"))
+			clock.SetText(formatClock(nextTime))
+			if calculateActiveChart() {
+				status.SetText(fmt.Sprintf("Moved natal chart to %s %s", date.Text, clock.Text))
+			}
+			return
+		}
+
+		if !activeChartType.RequiresReferenceTime() {
+			status.SetText(fmt.Sprintf("%s has no navigable reference time", activeChartType.String()))
+			return
+		}
+		if !hasActiveSavedChart {
+			status.SetText("Select a saved derived chart first")
+			return
+		}
+		referenceTime, err := referenceTimeFromChart(activeSavedChart)
+		if err != nil {
+			status.SetText(err.Error())
+			return
+		}
+		nextTime := stepTime(referenceTime, unit, amount)
+		activeSavedChart.ReferenceDate = nextTime.Format("2006-01-02")
+		activeSavedChart.ReferenceTime = formatClock(nextTime)
+		activeSavedChart.ReferenceUTC = nextTime.Format(time.RFC3339)
+		resolvedChart, err := resolver.Resolve(activeSavedChart, savedCharts)
+		if err != nil {
+			status.SetText(err.Error())
+			updateWorkspaceChrome()
+			return
+		}
+		if resolvedChart.Synastry != nil {
+			nextSynastry := *resolvedChart.Synastry
+			if synastrySwapped {
+				nextSynastry = swapSynastry(nextSynastry)
+			}
+			refreshSynastryChart(nextSynastry)
+		} else if resolvedChart.Single != nil {
+			refreshChart(*resolvedChart.Single)
+		}
+		status.SetText(fmt.Sprintf("Moved %s reference to %s %s UTC", activeChartType.String(), activeSavedChart.ReferenceDate, activeSavedChart.ReferenceTime))
+	}
+
+	swapActiveSynastry := func() {
+		if activeSynastryChart == nil {
+			status.SetText("Select a synastry-style chart first")
+			return
+		}
+		swapped := swapSynastry(*activeSynastryChart)
+		synastrySwapped = !synastrySwapped
+		refreshSynastryChart(swapped)
+		status.SetText(fmt.Sprintf("Swapped Synastry %s x %s", swapped.InnerChart.Name, swapped.OuterChart.Name))
 	}
 
 	showNewNatalChartDialog := func() {
@@ -303,7 +427,7 @@ func Launch() {
 		locText := locationName.Text
 		latText := latitude.Text
 		lngText := longitude.Text
-		
+
 		if settings.DefaultLocation != "" || settings.DefaultLat != "" {
 			if settings.DefaultLocation != "" {
 				locText = settings.DefaultLocation
@@ -652,29 +776,22 @@ func Launch() {
 		dataWindow.Show()
 	}
 
-	resetForm := func() {
-		selectedSavedID = ""
-		name.SetText(initial.Name)
-		date.SetText("1990-01-01")
-		clock.SetText("12:00")
-		timezone.SetText("0")
-		locationName.SetText("Amsterdam, Netherlands")
-		latitude.SetText("52.3676")
-		longitude.SetText("4.9041")
-		houseSystem.SetSelected(astro.DefaultHouseSystem().Label())
-		currentInputSummary.SetText(currentChartInputSummary(name.Text, date.Text, clock.Text))
-		refreshChart(chart)
-		refreshSavedCharts()
-	}
-
 	setDarkTheme := func() {
 		// nolint:staticcheck // Intentionally setting a theme variant on user action
 		application.Settings().SetTheme(theme.DarkTheme())
+		if activeSynastryChart != nil {
+			refreshSynastryChart(*activeSynastryChart)
+			return
+		}
 		refreshChart(currentChart)
 	}
 	setLightTheme := func() {
 		// nolint:staticcheck // Intentionally setting a theme variant on user action
 		application.Settings().SetTheme(theme.LightTheme())
+		if activeSynastryChart != nil {
+			refreshSynastryChart(*activeSynastryChart)
+			return
+		}
 		refreshChart(currentChart)
 	}
 
@@ -756,6 +873,10 @@ func Launch() {
 		}
 		selected := savedCharts[id]
 		selectedSavedID = selected.ID
+		activeSavedChart = selected
+		hasActiveSavedChart = true
+		activeChartType = chartTypeFromSaved(selected)
+		synastrySwapped = false
 		resolvedChart, err := resolver.Resolve(selected, savedCharts)
 		if err == nil {
 			if resolvedChart.Synastry != nil {
@@ -779,9 +900,11 @@ func Launch() {
 		if canCalculateSavedChart(selected) {
 			setFormFromSavedChart(selected)
 			status.SetText(err.Error())
+			updateWorkspaceChrome()
 			return
 		}
 		status.SetText(err.Error())
+		updateWorkspaceChrome()
 	}
 	if selectedSavedID != "" {
 		if selectedIndex := savedChartIndexByID(savedCharts, selectedSavedID); selectedIndex >= 0 {
@@ -835,27 +958,36 @@ func Launch() {
 	})
 	themeSelect.SetSelected("Dark")
 
-	toolbar := widget.NewToolbar(
-		widget.NewToolbarAction(theme.DocumentCreateIcon(), showNewNatalChartDialog),
-		widget.NewToolbarAction(theme.ContentAddIcon(), showNewDerivedChartDialog),
-		widget.NewToolbarAction(theme.AccountIcon(), showBirthDataDialog),
-		widget.NewToolbarAction(theme.SettingsIcon(), showGlobalSettings),
-		widget.NewToolbarAction(theme.ConfirmIcon(), calculate),
-		widget.NewToolbarAction(theme.DocumentSaveIcon(), saveCurrentChart),
-		widget.NewToolbarAction(theme.ViewRefreshIcon(), func() { refreshChart(currentChart) }),
-		widget.NewToolbarAction(theme.ContentUndoIcon(), resetForm),
-		widget.NewToolbarSeparator(),
-		widget.NewToolbarAction(theme.InfoIcon(), showSwephInfo),
-		widget.NewToolbarSpacer(),
+	backButton = widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() { navigateTime(-1) })
+	forwardButton = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() { navigateTime(1) })
+	stepAmount = widget.NewEntry()
+	stepAmount.SetText("1")
+	stepAmount.SetPlaceHolder("1")
+	stepAmount.Resize(fyne.NewSize(56, stepAmount.MinSize().Height))
+	stepUnit = widget.NewSelect(timeStepUnits(), nil)
+	stepUnit.SetSelected(timeStepUnitMinute)
+	swapButton = widget.NewButtonWithIcon("Swap", theme.ViewRefreshIcon(), swapActiveSynastry)
+	activeTimeLabel = widget.NewLabel("")
+	workspaceLabel = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+
+	timeToolbar := container.NewHBox(
+		backButton,
+		stepAmount,
+		stepUnit,
+		forwardButton,
+		widget.NewSeparator(),
+		activeTimeLabel,
+		swapButton,
 	)
 
 	header := container.NewBorder(
 		nil,
 		nil,
-		widget.NewLabelWithStyle("Natal Workbench", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		workspaceLabel,
 		themeSelect,
-		toolbar,
+		timeToolbar,
 	)
+	updateWorkspaceChrome()
 
 	chartPanel := container.NewBorder(header, status, nil, nil, chartBody)
 	mainSplit := container.NewHSplit(formPanel, chartPanel)
@@ -868,7 +1000,6 @@ func Launch() {
 func currentChartInputSummary(name, date, clock string) string {
 	return fmt.Sprintf("%s\n%s %s", name, date, clock)
 }
-
 
 func derivedChartTypeOptions() []string {
 	options := []string{}
@@ -954,7 +1085,6 @@ func savedChartMeta(chart storage.SavedChart, charts []storage.SavedChart) strin
 	}
 }
 
-
 func savedChartByID(charts []storage.SavedChart, id string) (storage.SavedChart, bool) {
 	for _, chart := range charts {
 		if chart.ID == id {
@@ -974,17 +1104,17 @@ func savedChartIndexByID(charts []storage.SavedChart, id string) int {
 }
 
 func parseReferenceDateTime(date, clock string) (time.Time, error) {
-	reference, err := time.Parse("2006-01-02 15:04", date+" "+clock)
+	reference, err := parseLocalDateTime(date, clock)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("reference date/time must use YYYY-MM-DD and HH:MM")
+		return time.Time{}, fmt.Errorf("reference date/time must use YYYY-MM-DD and HH:MM or HH:MM:SS")
 	}
-	return time.Date(reference.Year(), reference.Month(), reference.Day(), reference.Hour(), reference.Minute(), 0, 0, time.UTC), nil
+	return time.Date(reference.Year(), reference.Month(), reference.Day(), reference.Hour(), reference.Minute(), reference.Second(), 0, time.UTC), nil
 }
 
 func parseBirthData(name, date, clock, timezoneOffset, location, latitudeValue, longitudeValue, houseSystemLabel string) (astro.BirthData, error) {
-	localTime, err := time.Parse("2006-01-02 15:04", date+" "+clock)
+	localTime, err := parseLocalDateTime(date, clock)
 	if err != nil {
-		return astro.BirthData{}, fmt.Errorf("date/time must use YYYY-MM-DD and HH:MM")
+		return astro.BirthData{}, fmt.Errorf("date/time must use YYYY-MM-DD and HH:MM or HH:MM:SS")
 	}
 
 	offsetHours, err := strconv.ParseFloat(timezoneOffset, 64)
@@ -1008,7 +1138,7 @@ func parseBirthData(name, date, clock, timezoneOffset, location, latitudeValue, 
 		localTime.Day(),
 		localTime.Hour(),
 		localTime.Minute(),
-		0,
+		localTime.Second(),
 		0,
 		timeZone,
 	)
@@ -1060,4 +1190,3 @@ func newTabbableEntry() *tabbableEntry {
 func (e *tabbableEntry) AcceptsTab() bool {
 	return false
 }
-

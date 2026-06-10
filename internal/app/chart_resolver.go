@@ -304,7 +304,7 @@ func (r ChartResolver) Resolve(saved storage.SavedChart, charts []storage.SavedC
 }
 
 func birthDataFromSaved(saved storage.SavedChart) (astro.BirthData, error) {
-	localTime, err := time.Parse("2006-01-02 15:04", saved.LocalDate+" "+saved.LocalTime)
+	localTime, err := parseSavedDateTime(saved.LocalDate, saved.LocalTime)
 	if err != nil {
 		return astro.BirthData{}, fmt.Errorf("saved chart %q has invalid date/time", saved.Name)
 	}
@@ -330,7 +330,7 @@ func birthDataFromSaved(saved storage.SavedChart) (astro.BirthData, error) {
 		localTime.Day(),
 		localTime.Hour(),
 		localTime.Minute(),
-		0,
+		localTime.Second(),
 		0,
 		location,
 	)
@@ -364,11 +364,18 @@ func referenceTimeFromSaved(saved storage.SavedChart) (time.Time, error) {
 	if saved.ReferenceDate == "" || saved.ReferenceTime == "" {
 		return time.Time{}, fmt.Errorf("saved chart %q has no reference time", saved.Name)
 	}
-	reference, err := time.Parse("2006-01-02 15:04", saved.ReferenceDate+" "+saved.ReferenceTime)
+	reference, err := parseSavedDateTime(saved.ReferenceDate, saved.ReferenceTime)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("saved chart %q has invalid reference date/time", saved.Name)
 	}
-	return time.Date(reference.Year(), reference.Month(), reference.Day(), reference.Hour(), reference.Minute(), 0, 0, time.UTC), nil
+	return time.Date(reference.Year(), reference.Month(), reference.Day(), reference.Hour(), reference.Minute(), reference.Second(), 0, time.UTC), nil
+}
+
+func parseSavedDateTime(date, clock string) (time.Time, error) {
+	if parsed, err := time.Parse("2006-01-02 15:04:05", date+" "+clock); err == nil {
+		return parsed, nil
+	}
+	return time.Parse("2006-01-02 15:04", date+" "+clock)
 }
 
 func findSavedChart(charts []storage.SavedChart, id string) (storage.SavedChart, bool) {

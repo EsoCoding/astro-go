@@ -33,8 +33,11 @@ func CalculateOffset(timezoneName, dateStr, timeStr string) (float64, error) {
 		return 0, fmt.Errorf("failed to load location %q: %w", timezoneName, err)
 	}
 
-	// Parse the local date and time in that location
-	localTime, err := time.ParseInLocation("2006-01-02 15:04", dateStr+" "+timeStr, loc)
+	// Parse the local date and time in that location.
+	localTime, err := time.ParseInLocation("2006-01-02 15:04:05", dateStr+" "+timeStr, loc)
+	if err != nil {
+		localTime, err = time.ParseInLocation("2006-01-02 15:04", dateStr+" "+timeStr, loc)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse date/time %q %q: %w", dateStr, timeStr, err)
 	}
